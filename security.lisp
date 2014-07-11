@@ -122,30 +122,31 @@
      session-base-key)))
 
 ;; 3.3.1 NTLM v1 Authentication http://msdn.microsoft.com/en-us/library/cc236699.aspx                  
-(defun lm-response (lmowf server-challenge)
+(defun lm-response-v1 (lmowf server-challenge)
   (desl lmowf server-challenge))
 
-(defun nt-response (ntowf server-challenge)
+(defun nt-response-v1 (ntowf server-challenge)
   (desl ntowf server-challenge))
 
-(defun nt-response* (ntowf server-challenge client-challenge &key negotiate-extended-sessionsecurity)
+;; use these when there is a client challenge
+(defun nt-response-v1* (ntowf server-challenge client-challenge &key negotiate-extended-sessionsecurity)
   (cond
     (negotiate-extended-sessionsecurity
      (desl ntowf 
 	   (subseq (md5 (usb8 server-challenge client-challenge)) 0 8)))
-    (t (nt-response ntowf server-challenge))))
+    (t (nt-response-v1* ntowf server-challenge))))
 
-(defun lm-response* (lmowf ntowf server-challenge client-challenge 
+(defun lm-response-v1* (lmowf ntowf server-challenge client-challenge 
 		     &key negotiate-extended-sessionsecurity negotiate-lm-key)
   (cond
     (negotiate-extended-sessionsecurity    
      (usb8 client-challenge (make-array 16 :element-type '(unsigned-byte 8))))
     (negotiate-lm-key 
-     (lm-response lmowf server-challenge))
-    (t (nt-response* ntowf server-challenge client-challenge 
+     (lm-response-v1 lmowf server-challenge))
+    (t (nt-response-v1* ntowf server-challenge client-challenge 
 		     :negotiate-extended-sessionsecurity negotiate-extended-sessionsecurity))))
 
-(defun session-base-key (password)
+(defun session-base-key-v1 (password)
   (md4 (ntowf-v1 password)))
 
 ;; 3.3.2 NTLM v2 Authentication http://msdn.microsoft.com/en-us/library/cc236700.aspx
@@ -161,7 +162,7 @@
 			:domain-name domain-name)))
 	'(0 0 0 0)))
 
-(defun session-base-key* (ntowfv2 server-challenge client-challenge computer-name domain-name time)
+(defun session-base-key-v2 (ntowfv2 server-challenge client-challenge computer-name domain-name time)
   (let ((temp (make-temp time client-challenge computer-name domain-name)))
     (hmac-md5 ntowfv2
 	      (hmac-md5 ntowfv2 (usb8 server-challenge temp)))))

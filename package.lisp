@@ -26,13 +26,13 @@
 	   #:ntowf-v1
 	   #:ntowf-v2
 	   #:lmowf-v2
-	   #:session-base-key
-	   #:session-base-key*
+	   #:session-base-key-v1
+	   #:session-base-key-v2
 	   #:key-exchange-key
-	   #:lm-response
-	   #:nt-response
-	   #:lm-response*
-	   #:nt-response*
+	   #:lm-response-v1
+	   #:nt-response-v1
+	   #:lm-response-v1*
+	   #:nt-response-v1*
 	   #:lm-response-v2
 	   #:nt-response-v2
 	   #:sign-key
