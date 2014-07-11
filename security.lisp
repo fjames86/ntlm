@@ -48,14 +48,6 @@
     (ironclad:encrypt cipher data msg)
     msg))
 
-(defconstant* +lmowf-v1-data+ "KGS!@#$%")
-(defun lmowf-v1 (string)
-  "Tested and works"
-  (let ((bytes (pad (pack (string-upcase string) :string) 14)))
-    (usb8 (des (subseq bytes 0 7) (pack +lmowf-v1-data+ :string))
-          (des (subseq bytes 7 14) (pack +lmowf-v1-data+ :string)))))
-                      
-
 (defun md4 (msg)
   (declare ((vector (unsigned-byte 8)) msg))
   (ironclad:digest-sequence :md4 msg))
@@ -75,18 +67,34 @@
     (ironclad:encrypt cipher data msg)
     msg))
 
-(defun ntowf-v1 (string)
-  "This works correctly"
-  (md4 (pack string :wstring)))
 
 (defun hmac-md5 (key data)
   (let ((hmac (ironclad:make-hmac key :md5)))
     (ironclad:update-hmac hmac data)
     (ironclad:hmac-digest hmac)))
 
+;; 8-byte data item and 16-byte key
+(defun desl (key data)
+  (usb8 (des (subseq key 0 7) data)
+        (des (subseq key 7 14) data)
+        (des (pad (subseq key 14) 7) data)))
+
+;; 3.3.1 NTLM v1 Authentication http://msdn.microsoft.com/en-us/library/cc236699.aspx
+(defconstant* +lmowf-v1-data+ (pack "KGS!@#$%" :string))
+(defun lmowf-v1 (string)
+  "Tested and works"
+  (let ((bytes (pad (pack (string-upcase string) :string) 14)))
+    (usb8 (des (subseq bytes 0 7) +lmowf-v1-data+) 
+          (des (subseq bytes 7 14) +lmowf-v1-data+))))
+                      
+(defun ntowf-v1 (string)
+  "This works correctly"
+  (md4 (pack string :wstring)))
+
 (defun password-md4 (password)
   (md4 (pack password :wstring)))
 
+;; 3.3.2 NTLM v2 Authentication http://msdn.microsoft.com/en-us/library/cc236700.aspx
 (defun ntowf-v2 (username domain pword-md4)
   "Tested and works"
   (hmac-md5 pword-md4
@@ -97,13 +105,7 @@
   "Tested and works"
   (ntowf-v2 username domain pword-md4))
 
-;; 8-byte data item and 16-byte key
-(defun desl (key data)
-  (usb8 (des (subseq key 0 7) data)
-        (des (subseq key 7 14) data)
-        (des (pad (subseq key 14) 7) data)))
-
-;; http://msdn.microsoft.com/en-us/library/cc236710.aspx
+;; 3.4.5.1 KXKEY http://msdn.microsoft.com/en-us/library/cc236710.aspx
 (defun key-exchange-key (session-base-key lm-response server-challenge lmowf
                          &key negotiate-lm-key request-non-nt-session-key negotiate-extended-sessionsecurity)
   (cond
@@ -134,7 +136,7 @@
     (negotiate-extended-sessionsecurity
      (desl ntowf 
 	   (subseq (md5 (usb8 server-challenge client-challenge)) 0 8)))
-    (t (nt-response-v1* ntowf server-challenge))))
+    (t (nt-response-v1 ntowf server-challenge))))
 
 (defun lm-response-v1* (lmowf ntowf server-challenge client-challenge 
 		     &key negotiate-extended-sessionsecurity negotiate-lm-key)
