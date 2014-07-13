@@ -57,7 +57,7 @@
                (dotimes (i count)
                  (let ((char (code-char (svref lbuff i))))
                    (format t "~C" 
-                           (if (alphanumericp char) char #\.))))
+                           (if (graphic-char-p char) char #\.))))
                (terpri)))
       (do ((pos 0 (+ pos 16)))
           ((>= pos len))
@@ -330,8 +330,9 @@
                (av-pair-value av-pair)))
 
 (defun unpack-av-pair (buffer)
-  (multiple-value-bind (av-pair value) (unpack buffer 'av-pair)
-    (let ((id (enum-id (av-pair-id av-pair) *av-pair-ids*)))
+  (multiple-value-bind (av-pair payload) (unpack buffer 'av-pair)
+    (let ((id (enum-id (av-pair-id av-pair) *av-pair-ids*))
+	  (value (subseq* payload 0 (av-pair-len av-pair))))
       (unless id (error "Invalid AV_PAIR id ~S" (av-pair-id av-pair)))
       (setf (av-pair-id av-pair) 
             id
@@ -513,11 +514,11 @@
   (print-unreadable-object (msg stream :type t)
     (format stream ":TARGET-NAME ~S" (challenge-message-target-name msg))))
 
-(defun pack-challenge-message (flags challenge &key target-name target-info version)
+(defun pack-challenge-message (flags server-challenge &key target-name target-info version)
   "target-info should be a list of av-pair objects"
   (let ((msg (make-instance 'challenge-message 
                             :flags (pack-negotiate-flags flags)
-                            :challenge challenge))
+                            :challenge server-challenge))
         (offset (type-size 'challenge-message))
         (tbuff nil)
         (ibuff nil)
@@ -590,11 +591,12 @@
       (setf (challenge-message-target-info msg) nil)
       ;; only get the av-pairs when the field says there is some to get 
       (when (> (ntlm-field-len ifield) 0)
-	(do ((offset (- (ntlm-field-offset ifield) tsize))
+	(do ((len (length payload))
+	     (offset (- (ntlm-field-offset ifield) tsize))
 	     (eol nil))
-	    ((or eol (>= offset (length payload))))
+	    ((or eol (>= offset len)))
 	  (let ((av-pair (unpack-av-pair (subseq payload offset))))
-	    (incf offset (av-pair-len av-pair))
+	    (incf offset (+ 4 (av-pair-len av-pair)))
 	    (when (eq (av-pair-id av-pair) :eol)
 	      (setf eol t))
 	    (push av-pair (challenge-message-target-info msg))))
@@ -647,7 +649,7 @@
 
 (defun pack-authenticate-message (flags &key lm-response nt-response 
 					  domain username workstation 
-					  session-key version mic)
+					  encrypted-session-key version mic)
   (let ((msg (make-instance 'authenticate-message
                             :flags (pack-negotiate-flags flags)))
         (offset (type-size 'authenticate-message))
@@ -714,14 +716,14 @@
               footer 
               (concatenate 'vector footer buff))))
 
-    ;; session-key
-    (when session-key
+    ;; encrypted session-key
+    (when encrypted-session-key
       (setf (authenticate-message-session-key-field msg)
-              (make-ntlm-field (length session-key) offset)
+              (make-ntlm-field (length encrypted-session-key) offset)
               offset
-              (+ offset (length session-key))
+              (+ offset (length encrypted-session-key))
               footer 
-              (concatenate 'vector footer session-key)))
+              (concatenate 'vector footer encrypted-session-key)))
 
     ;; done
     (concatenate 'vector

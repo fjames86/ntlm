@@ -213,8 +213,6 @@
         (sno (unpack (rc4 sealing-key (pack 0 :uint32))
 		     :uint32)))
     (pack-message-signature chksum (1+ (logxor sno seqno)) rpad)))
-
-
     
 (defun encrypted-session-key (key-exchange-key session-key)
   (rc4 key-exchange-key session-key))

@@ -228,4 +228,142 @@
 			0))
   (hd (usb8 *example-session-base-key-v2*)))
 
+(defparameter *example-lmv2-response*
+  '(#x86 #xc3 #x50 #x97 #xac #x9c #xec #x10 #x25 #x54 #x76 #x4a #x57 #xcc #xcc #x19 
+    #xaa #xaa #xaa #xaa #xaa #xaa #xaa #xaa))
 
+;; 4.2.4.2.1 LMv2 Response http://msdn.microsoft.com/en-us/library/cc669120.aspx
+(defun test-lmv2-response ()
+  (hd
+   (lm-response-v2 (lmowf-v2 "User" "Domain" (password-md4 "Password"))
+		   (usb8 *server-challenge*)
+		   (usb8 *client-challenge*)))
+  (hd (usb8 *example-lmv2-response*)))
+
+(defparameter *example-ntlmv2-response*
+  '(#x68 #xcd #x0a #xb8 #x51 #xe5 #x1c #x96 #xaa #xbc #x92 #x7b #xeb #xef #x6a #x1c))
+
+;; 4.2.4.2.2 NTLMv2 Response http://msdn.microsoft.com/en-us/library/cc669121.aspx
+(defun test-ntlmv2-response ()
+  (hd
+   (subseq 
+    (nt-response-v2 (ntowf-v2 "User" "Domain" (password-md4 "Password"))
+		    (usb8 *server-challenge*)
+		    (usb8 *client-challenge*)
+		    "Server"
+		    "Domain"
+		    0)
+    0 16))
+  (hd 
+   (usb8 *example-ntlmv2-response*)))
+
+(defparameter *example-encrypted-session-key-v2*
+  '(#xc5 #xda #xd2 #x54 #x4f #xc9 #x79 #x90 #x94 #xce #x1c #xe9 #x0b #xc9 #xd0 #x3e))
+
+;; 4.2.4.2.3 Encrypted Session Key http://msdn.microsoft.com/en-us/library/cc669122.aspx
+(defun test-encrypted-session-key-v2 ()
+  (hd
+   (encrypted-session-key 
+    (key-exchange-key 
+     (session-base-key-v2 (ntowf-v2 "User" "Domain" (password-md4 "Password"))
+			  (usb8 *server-challenge*)
+			  (usb8 *client-challenge*)
+			  "Server"
+			  "Domain"
+			  0)
+     (lm-response-v2 (lmowf-v2 "User" "Domain" (password-md4 "Password"))
+		     (usb8 *server-challenge*)
+		     (usb8 *client-challenge*))
+     (usb8 *server-challenge*)
+     (lmowf-v2 "User" "Domain" (password-md4 "Password")))
+    (usb8 *session-key*)))
+  (hd
+   (usb8 *example-encrypted-session-key-v2*)))
+
+(defparameter *flags-v2*
+  '(:NEGOTIATE-KEY-EXCH :NEGOTIATE-56 :NEGOTIATE-128
+    :NEGOTIATE-VERSION :NEGOTIATE-TARGET-INFO :NEGOTIATE-EXTENDED-SESSIONSECURITY
+    :TARGET-TYPE-SERVER :NEGOTIATE-ALWAYS-SIGN :NEGOTIATE-NTLM
+    :NEGOTIATE-SEAL :NEGOTIATE-SIGN :NEGOTIATE-OEM :NEGOTIATE-UNICODE))
+
+(defparameter *example-challenge-message-v2*
+  '(#x4e #x54 #x4c #x4d #x53 #x53 #x50 00 #x02 00 00 00 #x0c 00 #x0c 00
+    #x38 00 00 00 #x33 #x82 #x8a #xe2 01 #x23 #x45 #x67 #x89 #xab #xcd #xef
+    00 00 00 00 00 00 00 00 #x24 00 #x24 00 #x44 00 00 00
+    #x06 00 #x70 #x17 00 00 00 #x0f #x53 00 #x65 00 #x72 00 #x76 00
+    #x65 00 #x72 00 #x02 00 #x0c 00 #x44 00 #x6f 00 #x6d 00 #x61 00
+    #x69 00 #x6e 00 #x01 00 #x0c 00 #x53 00 #x65 00 #x72 00 #x76 00
+    #x65 00 #x72 00 00 00 00 00))
+
+;; 4.2.4.3 Messages http://msdn.microsoft.com/en-us/library/dd644747.aspx
+(defun test-challenge-message-v2 ()
+  (hd
+   (pack-challenge-message *flags-v2*
+			   (usb8 *server-challenge*)
+			   :target-name "Server"
+			   :version (make-ntlm-version 6 0 2600)
+			   :target-info (make-target-info 
+					 :domain-name "Domain"
+					 :computer-name "Server")))
+  (hd
+   (usb8 *example-challenge-message-v2*)))
+
+(defparameter *example-authenticate-message-v2*
+  '(#x4e #x54 #x4c #x4d #x53 #x53 #x50 00 #x03 00 00 00 #x18 00 #x18 00
+    #x6c 00 00 00 #x54 00 #x54 00 #x84 00 00 00 #x0c 00 #x0c 00
+    #x48 00 00 00 #x08 00 #x08 00 #x54 00 00 00 #x10 00 #x10 00
+    #x5c 00 00 00 #x10 00 #x10 00 #xd8 00 00 00 #x35 #x82 #x88 #xe2
+    #x05 #x01 #x28 #x0a 00 00 00 #x0f #x44 00 #x6f 00 #x6d 00 #x61 00
+    #x69 00 #x6e 00 #x55 00 #x73 00 #x65 00 #x72 00 #x43 00 #x4f 00
+    #x4d 00 #x50 00 #x55 00 #x54 00 #x45 00 #x52 00 #x86 #xc3 #x50 #x97
+    #xac #x9c #xec #x10 #x25 #x54 #x76 #x4a #x57 #xcc #xcc #x19 #xaa #xaa #xaa #xaa
+    #xaa #xaa #xaa #xaa #x68 #xcd #x0a #xb8 #x51 #xe5 #x1c #x96 #xaa #xbc #x92 #x7b
+    #xeb #xef #x6a #x1c #x01 #x01 00 00 00 00 00 00 00 00 00 00
+    00 00 00 00 #xaa #xaa #xaa #xaa #xaa #xaa #xaa #xaa 00 00 00 00
+    #x02 00 #x0c 00 #x44 00 #x6f 00 #x6d 00 #x61 00 #x69 00 #x6e 00
+    #x01 00 #x0c 00 #x53 00 #x65 00 #x72 00 #x76 00 #x65 00 #x72 00
+    00 00 00 00 00 00 00 00 #xc5 #xda #xd2 #x54 #x4f #xc9 #x79 #x90
+    #x94 #xce #x1c #xe9 #x0b #xc9 #xd0 #x3e))
+
+;; my code seems to order the message differently, but unpacks the same so should be equivalent 
+;; to the example.
+(defun test-authenticate-message-v2 ()
+  (let ((msg
+	 (pack-authenticate-message *flags-v2*
+				    :lm-response 
+				    (lm-response-v2 (lmowf-v2 "User" "Domain" (password-md4 "Password"))
+						    (usb8 *server-challenge*)
+						    (usb8 *client-challenge*))
+				    :nt-response 
+				    (nt-response-v2 (ntowf-v2 "User" "Domain" (password-md4 "Password"))
+						    (usb8 *server-challenge*)
+						    (usb8 *client-challenge*)
+						    "Server"
+						    "Domain"
+						    0)
+				    :domain "Domain"
+				    :username "User"
+				    :workstation "COMPUTER"
+				    :encrypted-session-key
+				    (encrypted-session-key 
+				     (key-exchange-key 
+				      (session-base-key-v2 (ntowf-v2 "User" "Domain" (password-md4 "Password"))
+							   (usb8 *server-challenge*)
+							   (usb8 *client-challenge*)
+							   "Server"
+							   "Domain"
+							   0)
+				      (lm-response-v2 (lmowf-v2 "User" "Domain" (password-md4 "Password"))
+						      (usb8 *server-challenge*)
+						      (usb8 *client-challenge*))
+				      (usb8 *server-challenge*)
+				      (lmowf-v2 "User" "Domain" (password-md4 "Password")))
+				     (usb8 *session-key*))
+				    :version (make-ntlm-version 5 1 2600))))
+    (hd msg)
+    (hd (usb8 *example-authenticate-message-v2*))
+    (list 
+     (unpack-authenticate-message msg)
+     (unpack-authenticate-message (usb8 *example-authenticate-message-v2*)))))
+
+  
