@@ -347,32 +347,38 @@
               (:channel-bindings (unpack value 'channel-bindings))))
       av-pair)))
 
-(defun make-target-info (&key computer-name domain-name dns-computer-name dns-domain-name dns-tree-name av-flags 
-			timestamp single-host target-name channel-bindings)
+(defun make-target-info (&rest av-types)
+;;&key computer-name domain-name dns-computer-name dns-domain-name dns-tree-name av-flags 
+;;			timestamp single-host target-name channel-bindings)
   "Make a list of AV_PAIR objects used for the target-info parameter to pack-challenge-message."
   (let ((av-pairs nil))
     (labels ((add-av-pair (id value)
 	       (push (make-av-pair id value) av-pairs)))
-      (when computer-name 
-	(add-av-pair :nb-computer-name computer-name))
-      (when domain-name
-	(add-av-pair :nb-domain-name domain-name))
-      (when dns-computer-name 
-	(add-av-pair :dns-computer-name dns-computer-name))
-      (when dns-domain-name 
-	(add-av-pair :dns-domain-name dns-domain-name))
-      (when dns-tree-name
-	(add-av-pair :dns-tree-name dns-tree-name))
-      (when av-flags
-	(add-av-pair :flags av-flags))
-      (when timestamp 
-	(add-av-pair :timestamp timestamp))
-      (when single-host
-	(add-av-pair :single-host single-host))
-      (when target-name
-	(add-av-pair :target-name target-name))
-      (when channel-bindings
-	(add-av-pair :channel-bindings channel-bindings))
+      (do ((kwargs av-types (cddr kwargs)))
+	  ((null kwargs))
+	(let ((type (car kwargs))
+	      (val (cadr kwargs)))
+	  (ecase type
+	    (:computer-name 
+	     (add-av-pair :nb-computer-name val))
+	    (:domain-name
+	     (add-av-pair :nb-domain-name val))
+	    (:dns-computer-name 
+	     (add-av-pair :dns-computer-name val))
+	    (:dns-domain-name 
+	     (add-av-pair :dns-domain-name val))
+	    (:dns-tree-name
+	     (add-av-pair :dns-tree-name val))
+	    (:av-flags
+	     (add-av-pair :flags val))
+	    (:timestamp 
+	     (add-av-pair :timestamp val))
+	    (:single-host
+	     (add-av-pair :single-host val))
+	    (:target-name
+	     (add-av-pair :target-name val))
+	    (:channel-bindings
+	     (add-av-pair :channel-bindings val)))))
       (add-av-pair :eol nil)
 
       (nreverse av-pairs))))

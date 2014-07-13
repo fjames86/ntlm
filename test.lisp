@@ -218,9 +218,8 @@
   '(#x8d #xe4 #x0c #xca #xdb #xc1 #x4a #x82 #xf1 #x5c #xb0 #xad #x0d #xe9 #x5c #xa3))
  
 ;; 4.2.4.1.2 Session Base Key http://msdn.microsoft.com/en-us/library/cc669118.aspx
-;; Can't get this to work??? Why is this not working???
 (defun test-session-base-key-v2 ()
-  (hd 
+  (hd    
    (session-base-key-v2 (ntowf-v2 "User" "Domain" (password-md4 "Password"))
 			(usb8 *server-challenge*)
 			(usb8 *client-challenge*)

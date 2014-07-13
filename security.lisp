@@ -160,10 +160,11 @@
 	(apply #'usb8
 	       (mapcar #'pack-av-pair 
 		       (make-target-info 
-			:computer-name computer-name 
-			:domain-name domain-name)))
-	'(0 0 0 0)))
+			:domain-name domain-name
+			:computer-name computer-name)))		
+	'(0 0 0 0)))p
 
+;; 3.3.2 NTLM v2 Authentication http://msdn.microsoft.com/en-us/library/cc236700.aspx
 (defun session-base-key-v2 (ntowfv2 server-challenge client-challenge computer-name domain-name time)
   (let ((temp (make-temp time client-challenge computer-name domain-name)))
     (hmac-md5 ntowfv2
