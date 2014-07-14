@@ -388,13 +388,18 @@
 (defun usb8-b64 (usb8)
   (cl-base64:usb8-array-to-base64-string usb8))
 
-(defparameter *example-http-neg-msg*
-  (b64-usb8  "TlRMTVNTUAABAAAAl7II4gcABwAuAAAABgAGACgAAAAGAbEdAAAAD0ZKQU1FU0VYU0VRVUk="))
+(defun test-http-request (uri)
+  (drakma:http-request uri
+                       :method :post
+                       :content "Hello"
+                       :additional-headers 
+                       `((:authorization . ,(format 
+                                             nil "Negotiate ~A" 
+                                             (usb8-b64 
+                                              (pack-negotiate-message *flags* 
+                                                                      :workstation "frank-lindev")))))))
 
-(defparameter *example-http-ch-msg*
-  (b64-usb8 "TlRMTVNTUAACAAAADgAOADgAAAAVwoni6RnXTia7czhg1q8BAAAAAI4AjgBGAAAABgGxHQAAAA9FAFgAUwBFAFEAVQBJAAIADgBFAFgAUwBFAFEAVQBJAAEADABGAEoAQQBNAEUAUwAEABYAZQB4AHMAZQBxAHUAaQAuAGMAbwBtAAMAJABmAGoAYQBtAGUAcwAuAGUAeABzAGUAcQB1AGkALgBjAG8AbQAFABYAZQB4AHMAZQBxAHUAaQAuAGMAbwBtAAcACACo78rXzpXPAQAAAAA="))
-
-(defparameter *example-http-auth-msg*
-  (b64-usb8 "TlRMTVNTUAADAAAAGAAYAH4AAAAyATIBlgAAAA4ADgBYAAAADAAMAGYAAAAMAAwAcgAAABAAEADIAQAAFYKI4gYBsR0AAAAPX2UdSvW16dNB1jNJfFBKOkUAWABTAEUAUQBVAEkAZgBqAGEAbQBlAHMARgBKAEEATQBFAFMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAsIog5xA+xbYLQWlr8VKvWQEBAAAAAAAAqO/K186VzwGsbFJ+8uQDkgAAAAACAA4ARQBYAFMARQBRAFUASQABAAwARgBKAEEATQBFAFMABAAWAGUAeABzAGUAcQB1AGkALgBjAG8AbQADACQAZgBqAGEAbQBlAHMALgBlAHgAcwBlAHEAdQBpAC4AYwBvAG0ABQAWAGUAeABzAGUAcQB1AGkALgBjAG8AbQAHAAgAqO/K186VzwEGAAQAAgAAAAgAMAAwAAAAAAAAAAAAAAAAMAAA0bmAabRses4HWtZyZSQ25puWJbRo5mn/wB0ADvk+S0MKABAAAAAAAAAAAAAAAAAAAAAAAAkAHABIAFQAVABQAC8AMQAyADcALgAwAC4AMAAuADEAAAAAAAAAAAAAAAAANS+RgfNWmIjpr7QprKKS2A=="))
 
 
+                                              
+                                                             
