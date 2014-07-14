@@ -8,7 +8,7 @@
   ((:file "package")
    (:file "messages" :depends-on ("package"))
    (:file "security" :depends-on ("messages")))
-  :depends-on (:packet :ironclad))
+  :depends-on (:packet :ironclad :cl-base64))
 
 
 
