@@ -160,15 +160,22 @@
 	(apply #'usb8
 	       (mapcar #'pack-av-pair 
 		       (make-target-info 
-			:domain-name domain-name
-			:computer-name computer-name)))		
-	'(0 0 0 0)))p
+                :ordering '(:domain-name :computer-name)
+                :domain-name domain-name
+                :computer-name computer-name)))
+	'(0 0 0 0)))
 
+(defun temp-list (buffer)
+  (list (cons :timestamp (unpack (subseq* buffer 8 8) :uint64))
+        (cons :client-challenge (subseq* buffer 24 8))
+        (cons :target-info (target-info-list 
+                            (unpack-target-info (subseq buffer 28))))))
+        
 ;; 3.3.2 NTLM v2 Authentication http://msdn.microsoft.com/en-us/library/cc236700.aspx
 (defun session-base-key-v2 (ntowfv2 server-challenge client-challenge computer-name domain-name time)
   (let ((temp (make-temp time client-challenge computer-name domain-name)))
     (hmac-md5 ntowfv2
-	      (hmac-md5 ntowfv2 (usb8 server-challenge temp)))))
+              (hmac-md5 ntowfv2 (usb8 server-challenge temp)))))
 
 (defun lm-response-v2 (lmowf server-challenge client-challenge)
   (usb8 (hmac-md5 lmowf 
@@ -180,7 +187,10 @@
     (usb8 (hmac-md5 ntowfv2 (usb8 server-challenge temp))
 	  temp)))
 
-		  
+(defun nt-response-v2-list (buffer)
+  (list (cons :nt-response (subseq buffer 0 16))
+        (cons :temp (temp-list (subseq buffer 16)))))
+
 
 ;; http://msdn.microsoft.com/en-us/library/cc236711.aspx
 (defun sign-key (session-key magic &key negotiate-extended-sessionsecurity)

@@ -88,10 +88,14 @@
 
 ;; 4.2.2.3 Messages http://msdn.microsoft.com/en-us/library/dd644758.aspx
 (defun test-challenge-message ()
-  (hd (pack-challenge-message *flags* (usb8 *server-challenge*) 
-			      :target-name "Server"
-			      :version (make-ntlm-version 6 0 #x1770)))
-  (hd (usb8 *example-challenge-message*)))
+  (let ((msg (pack-challenge-message *flags* (usb8 *server-challenge*) 
+                                     :target-name "Server"
+                                     :version (make-ntlm-version 6 0 #x1770))))
+    (hd msg)
+    (hd (usb8 *example-challenge-message*))
+    (list
+     (unpack-challenge-message msg)
+     (unpack-challenge-message (usb8 *example-challenge-message*)))))
 
 (defun make-test-authenticate-message ()
   (pack-authenticate-message *flags*
@@ -101,7 +105,7 @@
 			     :domain "Domain"
 			     :username "User"
 			     :workstation "COMPUTER"
-			     :session-key (encrypted-session-key 
+			     :encrypted-session-key (encrypted-session-key 
 					   (make-key-exchange-key :negotiate-lm-key nil)
 					   (usb8 *session-key*))))
  
@@ -119,10 +123,15 @@
     #xb3 #xf3 #x50 #xc8 #x95 #x86 #x82 #xec #xbb #x3e #x3c #xb7))
 
 ;; 4.2.2.3 Messages http://msdn.microsoft.com/en-us/library/dd644758.aspx
+;; My message is orderdered differently to the  example, but unpacks the same so
+;; should be equivalent? 
 (defun test-authenticate-message ()
-  (list 
-   (unpack-authenticate-message (make-test-authenticate-message))
-   (unpack-authenticate-message (usb8 *example-authenticate-message*))))
+  (let ((msg (make-test-authenticate-message)))
+    (hd msg)
+    (hd (usb8 *example-authenticate-message*))
+    (list 
+     (unpack-authenticate-message msg)
+     (unpack-authenticate-message (usb8 *example-authenticate-message*)))))
 
 
 ;; 4.2.3.1.1 NTOWFv1() http://msdn.microsoft.com/en-us/library/cc669107.aspx
@@ -180,23 +189,26 @@
 
 ;; 4.2.3.3 Messages  http://msdn.microsoft.com/en-us/library/dd644690.aspx
 (defun test-authenticate-message-* ()
-  (list 
-   (unpack-authenticate-message 
-    (pack-authenticate-message *flags* 
-			       :lm-response (lm-response-v1* (lmowf-v1 "Password") 
-							  (ntowf-v1 "Password") 
-							  (usb8 *server-challenge*) 
-							  (usb8 *client-challenge*) 
-							  :negotiate-extended-sessionsecurity t)
-			       :nt-response (nt-response-v1* (ntowf-v1 "Password") 
-							  (usb8 *server-challenge*) 
-							  (usb8 *client-challenge*) 
-							  :negotiate-extended-sessionsecurity t)
-			       :domain "DOMAIN" 
-			       :username "User" 
-			       :workstation "COMPUTER" 
-			       :version (make-ntlm-version 6 0 2600)))
-   (unpack-authenticate-message (usb8 *example-authenticate-message-*))))
+  (let ((msg (pack-authenticate-message 
+              *flags* 
+              :lm-response (lm-response-v1* (lmowf-v1 "Password") 
+                                            (ntowf-v1 "Password") 
+                                            (usb8 *server-challenge*) 
+                                            (usb8 *client-challenge*) 
+                                            :negotiate-extended-sessionsecurity t)
+              :nt-response (nt-response-v1* (ntowf-v1 "Password") 
+                                            (usb8 *server-challenge*) 
+                                            (usb8 *client-challenge*) 
+                                            :negotiate-extended-sessionsecurity t)
+              :domain "Domain" 
+              :username "User" 
+              :workstation "COMPUTER" 
+              :version (make-ntlm-version 6 0 2600))))
+    (hd msg)
+    (hd (usb8 *example-authenticate-message-*))
+    (list 
+     (unpack-authenticate-message msg)
+     (unpack-authenticate-message (usb8 *example-authenticate-message-*)))))
 
   
   
@@ -221,11 +233,11 @@
 (defun test-session-base-key-v2 ()
   (hd    
    (session-base-key-v2 (ntowf-v2 "User" "Domain" (password-md4 "Password"))
-			(usb8 *server-challenge*)
-			(usb8 *client-challenge*)
-			"Server"
-			"Domain"
-			0))
+                        (usb8 *server-challenge*)
+                        (usb8 *client-challenge*)
+                        "Server"
+                        "Domain"
+                        0))
   (hd (usb8 *example-session-base-key-v2*)))
 
 (defparameter *example-lmv2-response*
@@ -297,16 +309,19 @@
 
 ;; 4.2.4.3 Messages http://msdn.microsoft.com/en-us/library/dd644747.aspx
 (defun test-challenge-message-v2 ()
-  (hd
-   (pack-challenge-message *flags-v2*
-			   (usb8 *server-challenge*)
-			   :target-name "Server"
-			   :version (make-ntlm-version 6 0 2600)
-			   :target-info (make-target-info 
-					 :domain-name "Domain"
-					 :computer-name "Server")))
-  (hd
-   (usb8 *example-challenge-message-v2*)))
+  (let ((msg 
+         (pack-challenge-message *flags-v2*
+                                 (usb8 *server-challenge*)
+                                 :target-name "Server"
+                                 :version (make-ntlm-version 6 0 2600)
+                                 :target-info (make-target-info 
+                                               :domain-name "Domain"
+                                               :computer-name "Server"))))
+    (hd msg)
+    (hd (usb8 *example-challenge-message-v2*))
+    (list
+     (unpack-challenge-message msg)
+     (unpack-challenge-message (usb8 *example-challenge-message-v2*)))))
 
 (defparameter *example-authenticate-message-v2*
   '(#x4e #x54 #x4c #x4d #x53 #x53 #x50 00 #x03 00 00 00 #x18 00 #x18 00
@@ -367,3 +382,19 @@
      (unpack-authenticate-message (usb8 *example-authenticate-message-v2*)))))
 
   
+(defun b64-usb8 (string)
+  (cl-base64:base64-string-to-usb8-array string))
+
+(defun usb8-b64 (usb8)
+  (cl-base64:usb8-array-to-base64-string usb8))
+
+(defparameter *example-http-neg-msg*
+  (b64-usb8  "TlRMTVNTUAABAAAAl7II4gcABwAuAAAABgAGACgAAAAGAbEdAAAAD0ZKQU1FU0VYU0VRVUk="))
+
+(defparameter *example-http-ch-msg*
+  (b64-usb8 "TlRMTVNTUAACAAAADgAOADgAAAAVwoni6RnXTia7czhg1q8BAAAAAI4AjgBGAAAABgGxHQAAAA9FAFgAUwBFAFEAVQBJAAIADgBFAFgAUwBFAFEAVQBJAAEADABGAEoAQQBNAEUAUwAEABYAZQB4AHMAZQBxAHUAaQAuAGMAbwBtAAMAJABmAGoAYQBtAGUAcwAuAGUAeABzAGUAcQB1AGkALgBjAG8AbQAFABYAZQB4AHMAZQBxAHUAaQAuAGMAbwBtAAcACACo78rXzpXPAQAAAAA="))
+
+(defparameter *example-http-auth-msg*
+  (b64-usb8 "TlRMTVNTUAADAAAAGAAYAH4AAAAyATIBlgAAAA4ADgBYAAAADAAMAGYAAAAMAAwAcgAAABAAEADIAQAAFYKI4gYBsR0AAAAPX2UdSvW16dNB1jNJfFBKOkUAWABTAEUAUQBVAEkAZgBqAGEAbQBlAHMARgBKAEEATQBFAFMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAsIog5xA+xbYLQWlr8VKvWQEBAAAAAAAAqO/K186VzwGsbFJ+8uQDkgAAAAACAA4ARQBYAFMARQBRAFUASQABAAwARgBKAEEATQBFAFMABAAWAGUAeABzAGUAcQB1AGkALgBjAG8AbQADACQAZgBqAGEAbQBlAHMALgBlAHgAcwBlAHEAdQBpAC4AYwBvAG0ABQAWAGUAeABzAGUAcQB1AGkALgBjAG8AbQAHAAgAqO/K186VzwEGAAQAAgAAAAgAMAAwAAAAAAAAAAAAAAAAMAAA0bmAabRses4HWtZyZSQ25puWJbRo5mn/wB0ADvk+S0MKABAAAAAAAAAAAAAAAAAAAAAAAAkAHABIAFQAVABQAC8AMQAyADcALgAwAC4AMAAuADEAAAAAAAAAAAAAAAAANS+RgfNWmIjpr7QprKKS2A=="))
+
+

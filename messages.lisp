@@ -98,13 +98,16 @@
 
 (defun unpack-flags (number flags)
   "Split the number into its flags."
-  (let ((f nil))
+  (let ((f nil)
+        (num number))
     (dolist (flag flags)
       (let ((n (cadr flag)))
         (unless (zerop (logand number n))
           (push (car flag) f)
-          (setf number (logand number (lognot n))))))
-    (assert (zerop number))
+          (setf num (logand num (lognot n))))))
+    (unless (zerop num)
+      (warn "Input flags ~S remainder ~S" number num))
+;;    (assert (zerop number))
     f))
 
 (defun flag-p (number flag-name flags)
@@ -169,9 +172,9 @@
    (:negotiate-datagram 6 "requests connectionless authentication")
    (:negotiate-seal 5 "requests session key negotiation")
    (:negotiate-sign 4 "requests session key negotiation for signatures")
-   (:request-target 2 "a targetname must be supplied in the challenge message")
+   (:request-target 2 "a target name must be supplied in the challenge message")
    (:negotiate-oem 1 "requests oem character encoding")
-   (:negotiate-unicode 0 "requessts unicode encoding"))
+   (:negotiate-unicode 0 "requests unicode encoding"))
   "Negotiate flags")
 
 (defun pack-negotiate-flags (flags)
@@ -278,6 +281,11 @@
   (:packing 1)
   (:documentation "The Single_Host_Data structure allows a client to send machine-specific information within an authentication exchange to services on the same machine. The client can produce additional information to be processed in an implementation-specific way when the client and server are on the same host. If the server and client platforms are different or if they are on different hosts, then the information MUST be ignored. Any fields after the MachineID field MUST be ignored on receipt."))
 
+(defun single-host-list (single-host)
+  (list (cons :custom-data (when (single-host-data-present single-host)
+                             (single-host-custom-data single-host)))
+        (cons :machine-id (single-host-machine-id single-host))))
+  
             
 ;; FILETIME: The date and time as a 64-bit value in little-endian order representing the number of 100-nanosecond intervals elapsed since January 1, 1601 (UTC).
 (defconstant +secs-per-year+ 3155692)
@@ -317,17 +325,16 @@
             (pack value :wstring))
            (:flags (pack value :uint32))
            (:timestamp (pack value :uint64))
-           (:single-host (pack value 'single-host-data))
-           (:channel-bindings (pack value 'channel-bindings)))))
+           (:single-host (pack value 'single-host))
+           (:channel-bindings value)))) ;;(pack value 'channel-bindings)))))
     (make-instance 'av-pair 
                    :id (enum id *av-pair-ids*)
                    :len (length buff)
                    :value buff)))
 
 (defun pack-av-pair (av-pair)
-  (concatenate 'vector
-               (pack av-pair 'av-pair)
-               (av-pair-value av-pair)))
+  (usb8 (pack av-pair 'av-pair)
+        (av-pair-value av-pair)))
 
 (defun unpack-av-pair (buffer)
   (multiple-value-bind (av-pair payload) (unpack buffer 'av-pair)
@@ -344,46 +351,70 @@
                (unpack value :wstring))
               (:flags (unpack value :uint32))
               (:timestamp (unpack value :uint64))
-              (:single-host (unpack value 'single-host-data))
-              (:channel-bindings (unpack value 'channel-bindings))))
-      av-pair)))
+              (:single-host (single-host-list (unpack value 'single-host)))
+              (:channel-bindings value)))) ;;(unpack value 'channel-bindings))))
+      av-pair))
 
-(defun make-target-info (&rest av-types)
-;;&key computer-name domain-name dns-computer-name dns-domain-name dns-tree-name av-flags 
-;;			timestamp single-host target-name channel-bindings)
-  "Make a list of AV_PAIR objects used for the target-info parameter to pack-challenge-message."
-  (let ((av-pairs nil))
+(defun make-target-info (&key computer-name domain-name dns-computer-name 
+                           dns-domain-name dns-tree-name flags 
+                           timestamp single-host target-name channel-bindings ordering)
+  "Make a list of AV_PAIR objects used for the target-info parameter to pack-challenge-message.
+Specify the ordering of the AV_PAIR objects if required."
+  (let ((av-pairs nil)
+        (order 
+         (if ordering 
+             ordering
+             '(:computer-name :domain-name :dns-domain-name :dns-tree-name :flags :timestamp
+               :single-host :target-name :channel-bindings))))
     (labels ((add-av-pair (id value)
-	       (push (make-av-pair id value) av-pairs)))
-      (do ((kwargs av-types (cddr kwargs)))
-	  ((null kwargs))
-	(let ((type (car kwargs))
-	      (val (cadr kwargs)))
-	  (ecase type
-	    (:computer-name 
-	     (add-av-pair :nb-computer-name val))
-	    (:domain-name
-	     (add-av-pair :nb-domain-name val))
-	    (:dns-computer-name 
-	     (add-av-pair :dns-computer-name val))
-	    (:dns-domain-name 
-	     (add-av-pair :dns-domain-name val))
-	    (:dns-tree-name
-	     (add-av-pair :dns-tree-name val))
-	    (:av-flags
-	     (add-av-pair :flags val))
-	    (:timestamp 
-	     (add-av-pair :timestamp val))
-	    (:single-host
-	     (add-av-pair :single-host val))
-	    (:target-name
-	     (add-av-pair :target-name val))
-	    (:channel-bindings
-	     (add-av-pair :channel-bindings val)))))
-      (add-av-pair :eol nil)
+               (when (or value (eq id :eol))
+                 (push (make-av-pair id value) av-pairs))))
+      (dolist (name order)
+        (ecase name
+          (:computer-name 
+           (add-av-pair :nb-computer-name computer-name))
+          (:domain-name
+           (add-av-pair :nb-domain-name domain-name))
+          (:dns-computer-name 
+           (add-av-pair :dns-computer-name dns-computer-name))
+          (:dns-domain-name 
+           (add-av-pair :dns-domain-name dns-domain-name))
+          (:dns-tree-name
+           (add-av-pair :dns-tree-name dns-tree-name))
+          (:flags
+           (add-av-pair :flags flags))
+          (:timestamp 
+           (add-av-pair :timestamp timestamp))
+          (:single-host
+           (add-av-pair :single-host single-host))
+          (:target-name
+           (add-av-pair :target-name target-name))
+          (:channel-bindings
+           (add-av-pair :channel-bindings channel-bindings))))
+      (add-av-pair :eol nil))
 
-      (nreverse av-pairs))))
-	
+    (nreverse av-pairs)))
+
+(defun unpack-target-info (buffer)
+  (let (av-pairs)
+    (do ((len (length buffer))
+         (offset 0)
+         (eol nil))
+        ((or eol (>= offset len)))
+      (let ((av-pair (unpack-av-pair (subseq buffer offset))))
+        (incf offset (+ 4 (av-pair-len av-pair)))
+        (when (eq (av-pair-id av-pair) :eol)
+          (setf eol t))
+        (push av-pair av-pairs)))
+    (nreverse av-pairs)))
+
+(defun target-info-list (target-info)
+  (let (res)
+    (dolist (info target-info)
+      (unless (eq (av-pair-id info) :eol)
+        (push (cons (av-pair-id info) (av-pair-value info))
+              res)))
+    (nreverse res)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; negotiate message
@@ -441,11 +472,10 @@
 	    (+ offset (length wbuff))))
 
     ;; concat all the buffers
-    (concatenate 'vector
-                  (pack msg 'negotiate-message)
-		  vbuff
-                  dbuff
-                  wbuff)))
+    (usb8 (pack msg 'negotiate-message)
+          vbuff
+          dbuff
+          wbuff)))
 
 (defun negotiate-message-list (msg)
   (list (cons :flags (negotiate-message-flags msg))
@@ -541,24 +571,23 @@
     ;; target-info
     (when target-info
       (setf ibuff 
-	    (apply #'concatenate 'vector 
-		   (mapcar #'pack-av-pair target-info))
+	    (apply #'usb8 (mapcar #'pack-av-pair target-info))
 	    (challenge-message-target-info-field msg)
 	    (make-ntlm-field (length ibuff) offset)
 	    offset
 	    (+ offset (length ibuff))))
       
-    (concatenate 'vector
-                  (pack msg 'challenge-message)
+    (usb8 (pack msg 'challenge-message)
 		  vbuff
-                  tbuff
-                  ibuff)))
+          tbuff
+          ibuff)))
 
 (defun challenge-message-list (msg)
   (list (cons :flags (challenge-message-flags msg))
 	(cons :version (slot-value msg 'version))
 	(cons :target-name (challenge-message-target-name msg))
-	(cons :target-info (challenge-message-target-info msg))
+	(cons :target-info 
+          (target-info-list (challenge-message-target-info msg)))
 	(cons :server-challenge (slot-value msg 'server-challenge))))
 
 (defun unpack-challenge-message (buffer)
@@ -639,8 +668,8 @@
              :accessor authenticate-message-username)
    (workstation (:wstring 0) :initform "" :initarg :workstation
                 :accessor authenticate-message-workstation)
-   (session-key (:uint8 0) :initform nil :initarg :session-key
-             :accessor authenticate-message-session-key))
+   (encrypted-session-key (:uint8 0) :initform nil :initarg :session-key
+             :accessor authenticate-message-encrypted-session-key))
   (:packing 1))
 
 
@@ -660,13 +689,13 @@
 	(setf offset 
 	      (+ offset (length buff))
 	      footer
-	      (concatenate 'vector footer buff))))
+	      (usb8 footer buff))))
 
     (when mic
       (setf offset
 	    (+ offset (length mic))
 	    footer
-	    (concatenate 'vector footer mic)))
+	    (usb8 footer mic)))
 
     ;; lm-response
     (when lm-response
@@ -675,7 +704,7 @@
             offset
             (+ offset (length lm-response))
             footer
-            (concatenate 'vector footer lm-response)))
+            (usb8 footer lm-response)))
     
     ;; nt-response
     (when nt-response
@@ -684,7 +713,7 @@
             offset
             (+ offset (length nt-response))
             footer
-            (concatenate 'vector footer nt-response)))
+            (usb8 footer nt-response)))
 
     ;; domain
     (when domain
@@ -694,7 +723,7 @@
               offset
               (+ offset (length buff))
               footer 
-              (concatenate 'vector footer buff))))
+              (usb8 footer buff))))
 
     ;; username 
     (when username
@@ -704,7 +733,7 @@
               offset
               (+ offset (length buff))
               footer 
-              (concatenate 'vector footer buff))))
+              (usb8 footer buff))))
 
     ;; workstation
     (when workstation
@@ -714,7 +743,7 @@
               offset
               (+ offset (length buff))
               footer 
-              (concatenate 'vector footer buff))))
+              (usb8 footer buff))))
 
     ;; encrypted session-key
     (when encrypted-session-key
@@ -723,12 +752,11 @@
               offset
               (+ offset (length encrypted-session-key))
               footer 
-              (concatenate 'vector footer encrypted-session-key)))
+              (usb8 footer encrypted-session-key)))
 
     ;; done
-    (concatenate 'vector
-                 (pack msg 'authenticate-message)
-                 footer)))
+    (usb8 (pack msg 'authenticate-message)
+          footer)))
 
 (defun authenticate-message-list (msg)
   (list (cons :flags (authenticate-message-flags msg))
@@ -739,7 +767,7 @@
 	(cons :domain (authenticate-message-domain msg))
 	(cons :username (authenticate-message-username msg))
 	(cons :workstation (authenticate-message-workstation msg))
-	(cons :session-key (authenticate-message-session-key msg))))
+	(cons :encrypted-session-key (authenticate-message-encrypted-session-key msg))))
 
 
 (defun unpack-authenticate-message (buffer)
@@ -804,9 +832,9 @@
 	      (setf (authenticate-message-workstation msg)
 		    (unpack d :wstring)))))
 	
-	;; session-key
+	;; encrypted session-key
 	(let ((field (authenticate-message-session-key-field msg)))
-	  (setf (authenticate-message-session-key msg)
+	  (setf (authenticate-message-encrypted-session-key msg)
 		(get-field field)))))
 
     (authenticate-message-list msg)))
