@@ -100,8 +100,13 @@
 ;; 3.3.1 NTLM v1 Authentication http://msdn.microsoft.com/en-us/library/cc236699.aspx
 (defconstant* +lmowf-v1-data+ (pack "KGS!@#$%" :string))
 (defun lmowf-v1 (string)
-  "Tested and works"
-  (let ((bytes (pad (pack (string-upcase string) :string) 14)))
+  "Tested and works."
+  ;; NOTE: if the string is 14 or more chars, then replace with 0 
+  (let ((bytes (pad (pack (if (< (length string) 14)
+                              (string-upcase string)
+                              "")
+                          :string) 
+                    14)))
     (usb8 (des (subseq bytes 0 7) +lmowf-v1-data+) 
           (des (subseq bytes 7 14) +lmowf-v1-data+))))
                       

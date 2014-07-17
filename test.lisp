@@ -506,7 +506,7 @@
 
 (defun user-password-md4 (username)
   "Get a user's hashed password"
-  (gethash (intern username :keyword)*password-database*))
+  (gethash (intern username :keyword) *password-database*))
 
 ;; define a user
 (add-user "fjames" (password-md4 "jamesfrank"))
