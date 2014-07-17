@@ -493,13 +493,15 @@
 ;;;;;;;;;;;;;;;;;;;;;;
 
 (defvar *password-database* (make-hash-table)
-  "Database of username/password hash pairs")
+  "Database of username/password md4 hash pairs")
 
 (defun add-user (username password-md4)
   "Add a new user account"
   (let ((u (intern username :keyword)))
     (setf (gethash u *password-database*)
-          password-md4)
+          (if (stringp password-md4)
+              (password-md4 password-md4)
+              password-md4))
     u))
 
 (defun user-password-md4 (username)
@@ -524,29 +526,17 @@
                                                      server-challenge
                                                      (cdr (assoc :temp-buffer nt-response)))
                                      0 16)))
-        ;;      (hunchentoot:log-message* "SCH" "~%~S~%" server-challenge)
-        ;;      (hunchentoot:log-message* "CLIENT" "~%~S~%" client-response)
-        ;;      (hunchentoot:log-message* "SERVER" "~%~S~%" server-response)
+;;              (hunchentoot:log-message* "SCH" "~%~S~%" server-challenge)
+;;              (hunchentoot:log-message* "CLIENT" "~%~S~%" client-response)
+;;              (hunchentoot:log-message* "SERVER" "~%~S~%" server-response)
         (every #'= client-response server-response)))))
 
 
-
+;; store the server challenge in the acceptor
 (defclass test-acceptor (hunchentoot:acceptor)
-  ()
+  ((server-challenge :initarg :server-challenge :initform nil :accessor acceptor-server-challenge)
+   (message-mode :initform :negotiate :accessor acceptor-message-mode))
   (:default-initargs :address nil))
-
-;; need to store a list of server challenges so that we can generate a server response
-;; to compare against the client response. we need to store the server challenge 
-;; for each connection because it is not sent through again with the AUTHENTICATE message
-(defparameter *auth-list* nil)
-(defun add-auth (from server-challenge)
-  (push (cons from server-challenge) *auth-list*))
-(defun rem-auth (from)
-  (setf *auth-list*
-        (remove from *auth-list* :key #'car :test #'string-equal)))
-(defun get-auth (from)
-  (prog1 (cdr (assoc from *auth-list* :test #'string-equal))
-    (rem-auth from)))
   
 ;; process a request
 (defmethod hunchentoot:acceptor-dispatch-request ((acc test-acceptor) req)
@@ -554,16 +544,14 @@
          (authorization (cdr (assoc :authorization headers))))
     (if authorization 
         (let ((msg (authorization-msg authorization)))
-          (cond
-            ;; we don't know if this is a NEGOTIATE or AUTHENTICATE message
-            ;; so make a heuristic descision based on size of the message
-            ((> (length msg) (packet:type-size 'ntlm::authenticate-message))
+          (case (acceptor-message-mode acc)
+            (:authenticate
              (let ((amsg (unpack-authenticate-message msg)))
                (hunchentoot:log-message* "AUTHENTICATE" "User: ~A" (cdr (assoc :username amsg)))
-
-               ;; should really validate the authentication here; for testing purposes just assume its ok
+               
+               ;; validate the authentication
                (if (authenticate (cdr (assoc :nt-response amsg))
-                                 (get-auth (hunchentoot:remote-addr*))
+                                 (acceptor-server-challenge acc)
                                  (cdr (assoc :username amsg))
                                  (cdr (assoc :domain amsg)))
                    (format nil "Hello ~A!!!" (cdr (assoc :username amsg)))
@@ -571,13 +559,16 @@
                      (setf (hunchentoot:return-code*) 
                            hunchentoot:+http-authorization-required+)
                      "Unauthorized"))))
-            (t 
+            (:negotiate
              (let ((negotiate-msg (unpack-negotiate-message msg))
                    (server-challenge (server-challenge)))
                (hunchentoot:log-message* "NEGOTIATE" "Workstation: ~A" (cdr (assoc :workstation negotiate-msg)))
 
                ;; store the server challenge so that we know how to generate a response
-               (add-auth (hunchentoot:remote-addr*) server-challenge)
+               (setf (acceptor-server-challenge acc) server-challenge)
+               
+               ;; set to the next mode
+               (setf (acceptor-message-mode acc) :authenticate)
 
                ;; set the out header
                (setf (hunchentoot:header-out :WWW-AUTHENTICATE)

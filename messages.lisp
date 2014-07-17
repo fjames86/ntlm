@@ -602,7 +602,7 @@ Specify the ordering of the AV_PAIR objects if required."
    (server-challenge (:uint8 8) :initform nil :initarg :challenge)
 ;; this is supposed to be reserved (i.e. all 0) but the Windows HTTP Server sneakily sends something here.
 ;; what is it for?
-   (reserved (:uint8 8) :initform #(#x60 #xD6 #xAF #x01 00 00 00 00)) 
+   (reserved (:uint8 8) :initform nil) ;;#(#x60 #xD6 #xAF #x01 00 00 00 00)) 
    (target-info-field ntlm-field :initform (make-ntlm-field 0 0)
                       :initarg :target-info-field :accessor challenge-message-target-info-field)
    ;; payload 
