@@ -1,5 +1,21 @@
 
 
+;;;; NTLM Authentication library
+
+;;; 
+;;; Provides functions and data structures to handle the NTLM authentication protocol,
+;;; commonly used by Microsoft Windows platforms.
+;;; See http://msdn.microsoft.com/en-gb/library/cc236621.aspx for more information.
+;;;
+;;; Copyright (C) Frank James, July 2014
+;;;
+
+
+
+
+
+
+
 (in-package :ntlm)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -72,6 +88,11 @@
   "Make an (unsigned byte 8) vector from the sequences"
   (apply #'concatenate '(vector (unsigned-byte 8)) sequences))
 
+(defun usb8* (&rest numbers)
+  "Make an (unsigned-byte 8) vector from the numbers"
+  (make-array (length numbers)
+              :element-type '(unsigned-byte 8)
+              :initial-contents numbers))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Flags 
@@ -188,10 +209,18 @@
 (defun negotiate-flag-p (number flag)
   (flag-p number flag *negotiate-flags*))
 
+;; this must be at the start of every message
 (defconstant +ntlm-revision-w2k3+ 15)
 (defconstant* +ntlm-signature+ "NTLMSSP")
 
 ;; ---------------- packet type definitions follow -----------------
+
+;;
+;; NOTE: many of these structures take variable-size arrays. Because the PACKET library demands
+;; to know the sizes of these arrays at compile-time, we set them to be 0-length arrays (which 
+;; consume no space as far as PACKET is concerned) and extract the properties afterwards.
+;;
+
 
 (defpacket ntlm-field 
   ((len :uint16 :initform 0 :initarg :len :accessor ntlm-field-len)
@@ -219,6 +248,7 @@
   (:documentation "The VERSION structure contains Windows version information that SHOULD be ignored. This structure is used for debugging purposes only and its value does not affect NTLM message processing. It is present in the NEGOTIATE_MESSAGE, CHALLENGE_MESSAGE, and AUTHENTICATE_MESSAGE messages only if NTLMSSP_NEGOTIATE_VERSION is negotiated."))
 
 (defun ntlm-version-list (v)
+  "Convert an ntlm-version structure into an alist"
   (list (cons :major (slot-value v 'major))
 	(cons :minor (slot-value v 'minor))
 	(cons :build (slot-value v 'build))))
@@ -231,6 +261,7 @@
 	    (slot-value version 'build))))
 
 (defun make-ntlm-version (major minor build)
+  "Make an ntlm-version structure. MAJOR, MINOR and BUILD are all integers"
   (make-instance 'ntlm-version
 		 :major major
 		 :minor minor
@@ -244,16 +275,22 @@
   (:packing 1)
   (:documentation "This version of the NTLMSSP_MESSAGE_SIGNATURE structure MUST be used when the NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY flag is not negotiated."))
 
-(defun pack-message-signature (crc32 seqnum random-pad)
-  (let ((mac (make-instance 'ntlm-message-signature 
-			    :seqnum seqnum
-			    :checksum (subseq crc32 0 4)
-			    :random-pad random-pad)))
-    (pack mac 'ntlm-message-signature)))
+(defun pack-message-signature (crc32 seqnum)
+  "Make a message-signature structure for NTLMv1."
+  (let (ck rpad)
+    (if (= (length crc32) 8)
+        (setf rpad (subseq crc32 0 4)
+              ck (subseq crc32 4 8))
+        (setf rpad (usb8* 0 0 0 0)
+              ck (subseq crc32 0 4)))
+    (let ((mac (make-instance 'ntlm-message-signature 
+                              :seqnum seqnum
+                              :random-pad rpad
+                              :checksum ck)))
+      (pack mac 'ntlm-message-signature))))
 
 (defun unpack-message-signature (buffer)
   (unpack buffer 'ntlm-message-signature))
-
 
 (defpacket ntlm-message-signature-ex
   ((version :uint32 :initform 1)
@@ -263,6 +300,7 @@
   (:documentation "This version of the NTLMSSP_MESSAGE_SIGNATURE structure MUST be used when the NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY flag is negotiated."))
 
 (defun pack-message-signature-ex (crc32 seqnum)
+  "Make a message-signature structure for NTLMv2"
   (let ((mac (make-instance 'ntlm-message-signature-ex
 			    :seqnum seqnum
 			    :checksum (subseq crc32 0 8))))
@@ -281,17 +319,44 @@
   (:packing 1)
   (:documentation "The Single_Host_Data structure allows a client to send machine-specific information within an authentication exchange to services on the same machine. The client can produce additional information to be processed in an implementation-specific way when the client and server are on the same host. If the server and client platforms are different or if they are on different hosts, then the information MUST be ignored. Any fields after the MachineID field MUST be ignored on receipt."))
 
+(defun make-single-host (&key custom-data machine-id)
+  "Make a single-host structure for use in make-target-info"
+  (make-instance 'single-host 
+                 :data-present (if custom-data 1 0)
+                 :custom-data custom-data
+                 :machine-id machine-id))
+             
 (defun single-host-list (single-host)
+  "Convert a single-host into an alist"
   (list (cons :custom-data (when (single-host-data-present single-host)
                              (single-host-custom-data single-host)))
         (cons :machine-id (single-host-machine-id single-host))))
   
             
 ;; FILETIME: The date and time as a 64-bit value in little-endian order representing the number of 100-nanosecond intervals elapsed since January 1, 1601 (UTC).
-(defconstant +secs-per-year+ 3155692)
-(defun filetime ()
-  (* 10000 (+ (* 3 +secs-per-year+) (get-universal-time))))
+;; 100 nanoseconds since jan 1st 1600
+(defparameter *secs-1601-1970* 11643609600)
+(defun filetime-unix (filetime)
+  "Convert FILETIME into UNIX time"
+  (- (truncate filetime 10000000)
+     *secs-1601-1970*))
+   
+(defparameter *secs-1900-1970* 2208988800)
+(defun unix ()
+  "Number of seconds since Jan 1st 1970"
+  (- (get-universal-time)
+     *secs-1900-1970*))
 
+(defparameter *secs-1601-1900* 9434620800)
+(defun filetime ()
+  "Number of 100-nanosecond ticks since Jan 1st 1601"
+  (* (+ (get-universal-time)
+        *secs-1601-1900*)
+     10000000))
+
+
+
+;; av-pairs are used to make the target-info array
 (defenum *av-pair-ids*
     (:eol
      :nb-computer-name
@@ -317,6 +382,7 @@
     (format stream ":ID ~S :VALUE ~S" (av-pair-id av-pair) (av-pair-value av-pair))))
 
 (defun make-av-pair (id value)
+  "Construct an AV_PAIR object for use in target-info"
   (let ((buff
          (ecase id
            (:eol nil)
@@ -355,7 +421,7 @@
               (:channel-bindings value)))) ;;(unpack value 'channel-bindings))))
       av-pair))
 
-(defun make-target-info (&key computer-name domain-name dns-computer-name 
+(defun make-target-info (&key nb-computer-name nb-domain-name dns-computer-name 
                            dns-domain-name dns-tree-name flags 
                            timestamp single-host target-name channel-bindings ordering)
   "Make a list of AV_PAIR objects used for the target-info parameter to pack-challenge-message.
@@ -364,17 +430,17 @@ Specify the ordering of the AV_PAIR objects if required."
         (order 
          (if ordering 
              ordering
-             '(:computer-name :domain-name :dns-domain-name :dns-tree-name :flags :timestamp
+             '(:nb-computer-name :nb-domain-name :dns-computer-name :dns-domain-name :dns-tree-name :flags :timestamp
                :single-host :target-name :channel-bindings))))
     (labels ((add-av-pair (id value)
                (when (or value (eq id :eol))
                  (push (make-av-pair id value) av-pairs))))
       (dolist (name order)
         (ecase name
-          (:computer-name 
-           (add-av-pair :nb-computer-name computer-name))
-          (:domain-name
-           (add-av-pair :nb-domain-name domain-name))
+          (:nb-computer-name 
+           (add-av-pair :nb-computer-name nb-computer-name))
+          (:nb-domain-name
+           (add-av-pair :nb-domain-name nb-domain-name))
           (:dns-computer-name 
            (add-av-pair :dns-computer-name dns-computer-name))
           (:dns-domain-name 
@@ -409,6 +475,7 @@ Specify the ordering of the AV_PAIR objects if required."
     (nreverse av-pairs)))
 
 (defun target-info-list (target-info)
+  "Convert target-info into an assoc list"
   (let (res)
     (dolist (info target-info)
       (unless (eq (av-pair-id info) :eol)
@@ -441,6 +508,7 @@ Specify the ordering of the AV_PAIR objects if required."
             (negotiate-message-workstation msg))))
 
 (defun pack-negotiate-message (flags &key domain workstation version)
+  "Generate a NEGOTIATE message"
   (let ((msg (make-instance 'negotiate-message 
                             :flags (pack-negotiate-flags flags)))
         (dbuff nil)
@@ -478,12 +546,14 @@ Specify the ordering of the AV_PAIR objects if required."
           wbuff)))
 
 (defun negotiate-message-list (msg)
+  "Convert the negotiate-message structure into an assoc list"
   (list (cons :flags (negotiate-message-flags msg))
 	(cons :version (slot-value msg 'version))
 	(cons :domain (negotiate-message-domain msg))
 	(cons :workstation (negotiate-message-workstation msg))))
 
 (defun unpack-negotiate-message (buffer)
+  "Extract the negotiate message from the buffer"
   (multiple-value-bind (msg payload) (unpack buffer 'negotiate-message)
     (let ((flags (unpack-negotiate-flags (negotiate-message-flags msg)))
           (tsize (type-size 'negotiate-message)))
@@ -530,7 +600,7 @@ Specify the ordering of the AV_PAIR objects if required."
                       :accessor challenge-message-target-name-field)
    (negotiate-flags :uint32 :initform 0 :initarg :flags :accessor challenge-message-flags)
    (server-challenge (:uint8 8) :initform nil :initarg :challenge)
-   (reserved (:uint32 2) :initform nil)
+   (reserved (:uint8 8) :initform #(#x60 #xD6 #xAF #x01 00 00 00 00))
    (target-info-field ntlm-field :initform (make-ntlm-field 0 0)
                       :initarg :target-info-field :accessor challenge-message-target-info-field)
    ;; payload 
@@ -545,7 +615,14 @@ Specify the ordering of the AV_PAIR objects if required."
     (format stream ":TARGET-NAME ~S" (challenge-message-target-name msg))))
 
 (defun pack-challenge-message (flags server-challenge &key target-name target-info version)
-  "target-info should be a list of av-pair objects"
+  "Generate a CHALLENGE message for the server to send back to the client. 
+
+SERVER-CHALLENGE should be an array of 8 random bytes. This can be generated by calling server-challenge.
+VERSION should be the result of calling make-ntlm-version.
+
+TARGET-NAME should be a string.
+
+TARGET-INFO should be the result of calling make-target-info."
   (let ((msg (make-instance 'challenge-message 
                             :flags (pack-negotiate-flags flags)
                             :challenge server-challenge))
@@ -582,58 +659,66 @@ Specify the ordering of the AV_PAIR objects if required."
           tbuff
           ibuff)))
 
-(defun challenge-message-list (msg)
+(defun challenge-message-list (msg target-info-buffer)
   (list (cons :flags (challenge-message-flags msg))
 	(cons :version (slot-value msg 'version))
 	(cons :target-name (challenge-message-target-name msg))
 	(cons :target-info 
           (target-info-list (challenge-message-target-info msg)))
-	(cons :server-challenge (slot-value msg 'server-challenge))))
+	(cons :server-challenge (slot-value msg 'server-challenge))
+    (cons :target-info-buffer target-info-buffer)))
 
 (defun unpack-challenge-message (buffer)
   (multiple-value-bind (msg payload) (unpack buffer 'challenge-message)
     (let ((tfield (challenge-message-target-name-field msg))
           (ifield (challenge-message-target-info-field msg))
           (flags (unpack-negotiate-flags (challenge-message-flags msg)))
-          (tsize (type-size 'challenge-message)))
+          (tsize (type-size 'challenge-message))
+          (target-info-buffer nil))
 
       (setf (challenge-message-flags msg) flags)
 
       ;; version
       (if (member :NEGOTIATE-VERSION (challenge-message-flags msg))
-	  (setf (slot-value msg 'version)
-		(ntlm-version-list (unpack (subseq payload 0 (type-size 'ntlm-version))
-					   'ntlm-version)))
-	  (setf (slot-value msg 'version)
-		nil))
+          (setf (slot-value msg 'version)
+                (ntlm-version-list (unpack (subseq payload 0 (type-size 'ntlm-version))
+                                           'ntlm-version)))
+          (setf (slot-value msg 'version)
+                nil))
 
       ;; target-name 
       (if (zerop (ntlm-field-len tfield))
-	  (setf (challenge-message-target-name msg) nil)
-	  (setf (challenge-message-target-name msg)
-		(unpack (subseq* payload 
-				 (- (ntlm-field-offset tfield) tsize)
-				 (ntlm-field-len tfield))
-			:wstring)))
+          (setf (challenge-message-target-name msg) nil)
+          (setf (challenge-message-target-name msg)
+                (unpack (subseq* payload 
+                                 (- (ntlm-field-offset tfield) tsize)
+                                 (ntlm-field-len tfield))
+                        :wstring)))
 
       ;; target-info av-pairs 
       (setf (challenge-message-target-info msg) nil)
       ;; only get the av-pairs when the field says there is some to get 
       (when (> (ntlm-field-len ifield) 0)
-	(do ((len (length payload))
-	     (offset (- (ntlm-field-offset ifield) tsize))
-	     (eol nil))
-	    ((or eol (>= offset len)))
-	  (let ((av-pair (unpack-av-pair (subseq payload offset))))
-	    (incf offset (+ 4 (av-pair-len av-pair)))
-	    (when (eq (av-pair-id av-pair) :eol)
-	      (setf eol t))
-	    (push av-pair (challenge-message-target-info msg))))
-	
-	(setf (challenge-message-target-info msg)
-	      (reverse (challenge-message-target-info msg))))
+        ;; extract the binary data for later use 
+        (setf target-info-buffer 
+              (subseq* payload 
+                       (- (ntlm-field-offset ifield) tsize)
+                       (ntlm-field-len ifield)))
 
-     (challenge-message-list msg))))
+        (do ((len (length payload))
+             (offset (- (ntlm-field-offset ifield) tsize))
+             (eol nil))
+            ((or eol (>= offset len)))
+          (let ((av-pair (unpack-av-pair (subseq payload offset))))
+            (incf offset (+ 4 (av-pair-len av-pair)))
+            (when (eq (av-pair-id av-pair) :eol)
+              (setf eol t))
+            (push av-pair (challenge-message-target-info msg))))
+        
+        (setf (challenge-message-target-info msg)
+              (reverse (challenge-message-target-info msg))))
+
+      (challenge-message-list msg target-info-buffer))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; this is sent back to the server by the cliehnt 
@@ -679,6 +764,17 @@ Specify the ordering of the AV_PAIR objects if required."
 (defun pack-authenticate-message (flags &key lm-response nt-response 
 					  domain username workstation 
 					  encrypted-session-key version mic)
+  "Generate an AUTHENTICATE message for the client to send back to the server.
+
+LM-RESPONSE and NT-RESPONSE should be the results of calling the lm-response(-v1,-v1*,-v2)/nt-response(-v1,-v2) functions.
+
+DOMAIN, USERNAME, WORKSTATION should be strings.
+
+ENCRYPTED-SESSION-KEY should be the result of calling encrypted-session-key.
+
+VERSION should be the result of calling make-ntlm-version.
+
+MIC is optional and can be ignored. It should be the result of calling mic."
   (let ((msg (make-instance 'authenticate-message
                             :flags (pack-negotiate-flags flags)))
         (offset (type-size 'authenticate-message))

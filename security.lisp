@@ -1,4 +1,15 @@
 
+;;;; NTLM Authentication library
+
+;;; 
+;;; Provides functions and data structures to handle the NTLM authentication protocol,
+;;; commonly used by Microsoft Windows platforms.
+;;; See http://msdn.microsoft.com/en-gb/library/cc236621.aspx for more information.
+;;;
+;;; Copyright (C) Frank James, July 2014
+;;;
+
+
 
 (in-package :ntlm)
 
@@ -60,13 +71,20 @@
   (declare ((vector (unsigned-byte 8)) msg))
   (ironclad:digest-sequence :crc32 msg))
 
-(defun rc4 (key data)
+(defun rc4k (key data)
   "Tested and works"
   (let ((cipher (ironclad:make-cipher :arcfour :key key :mode :stream))
         (msg (make-array (length data) :element-type '(unsigned-byte 8))))
     (ironclad:encrypt cipher data msg)
     msg))
 
+(defun rc4-init (key)
+  (ironclad:make-cipher :arcfour :key key :mode :stream))
+
+(defun rc4 (cipher data)
+  (let ((msg (make-array (length data) :element-type '(unsigned-byte 8))))
+    (ironclad:encrypt cipher data msg)
+    msg))
 
 (defun hmac-md5 (key data)
   (let ((hmac (ironclad:make-hmac key :md5)))
@@ -152,77 +170,120 @@
   (md4 (ntowf-v1 password)))
 
 ;; 3.3.2 NTLM v2 Authentication http://msdn.microsoft.com/en-us/library/cc236700.aspx
-(defun make-temp (time client-challenge computer-name domain-name)
+(defun make-temp (time client-challenge target-info)
   (usb8 '(1 1 0 0 0 0 0 0) 
 	(pack time :uint64)
 	client-challenge 
 	'(0 0 0 0) 
-	(apply #'usb8
-	       (mapcar #'pack-av-pair 
-		       (make-target-info 
-                :ordering '(:domain-name :computer-name)
-                :domain-name domain-name
-                :computer-name computer-name)))
+    (if (arrayp target-info)
+        target-info
+        (apply #'usb8 (mapcar #'pack-av-pair target-info)))
 	'(0 0 0 0)))
 
 (defun temp-list (buffer)
   (list (cons :timestamp (unpack (subseq* buffer 8 8) :uint64))
-        (cons :client-challenge (subseq* buffer 24 8))
+        (cons :client-challenge (subseq* buffer 16 8))
         (cons :target-info (target-info-list 
                             (unpack-target-info (subseq buffer 28))))))
         
 ;; 3.3.2 NTLM v2 Authentication http://msdn.microsoft.com/en-us/library/cc236700.aspx
-(defun session-base-key-v2 (ntowfv2 server-challenge client-challenge computer-name domain-name time)
-  (let ((temp (make-temp time client-challenge computer-name domain-name)))
-    (hmac-md5 ntowfv2
-              (hmac-md5 ntowfv2 (usb8 server-challenge temp)))))
+(defun session-base-key-v2 (ntowfv2 server-challenge temp)
+  (hmac-md5 ntowfv2
+            (hmac-md5 ntowfv2 (usb8 server-challenge temp))))
 
 (defun lm-response-v2 (lmowf server-challenge client-challenge)
   (usb8 (hmac-md5 lmowf 
 		  (usb8 server-challenge client-challenge))
 	client-challenge))
 
-(defun nt-response-v2 (ntowfv2 server-challenge client-challenge computer-name domain-name time)
-  (let ((temp (make-temp time client-challenge computer-name domain-name)))
-    (usb8 (hmac-md5 ntowfv2 (usb8 server-challenge temp))
-	  temp)))
+(defun nt-response-v2 (ntowfv2 server-challenge temp) 
+  (usb8 (hmac-md5 ntowfv2 (usb8 server-challenge temp))
+        temp))
 
 (defun nt-response-v2-list (buffer)
   (list (cons :nt-response (subseq buffer 0 16))
-        (cons :temp (temp-list (subseq buffer 16)))))
+        (cons :temp (temp-list (subseq buffer 16)))
+        (cons :temp-buffer (subseq buffer 16))))
 
 
-;; http://msdn.microsoft.com/en-us/library/cc236711.aspx
-(defun sign-key (session-key magic &key negotiate-extended-sessionsecurity)
+;; 3.4.5.2 SIGNKEY http://msdn.microsoft.com/en-us/library/cc236711.aspx
+(defun sign-key (exported-session-key magic-constant &key negotiate-extended-sessionsecurity)
   (cond
     (negotiate-extended-sessionsecurity
-     (md5 (usb8 session-key magic)))
+     (md5 (usb8 exported-session-key magic-constant)))
     (t nil)))
 
-;; http://msdn.microsoft.com/en-us/library/cc236712.aspx
-(defun seal-key (session-key magic &key negotiate-extended-sessionsecurity 
+;; 3.4.5.3 SEALKEY http://msdn.microsoft.com/en-us/library/cc236712.aspx
+(defun seal-key (exported-session-key magic-constant &key negotiate-extended-sessionsecurity 
                                negotiate-lm-key negotiate-datagram negotiate-56
                                negotiate-128)
   (cond
     (negotiate-extended-sessionsecurity
      (let ((skey (cond
-                   (negotiate-128 session-key)
-                   (negotiate-56 (subseq session-key 0 7))
-                   (t (subseq session-key 0 5)))))
-       (md5 (usb8 skey magic))))
+                   (negotiate-128 exported-session-key)
+                   (negotiate-56 (subseq exported-session-key 0 7))
+                   (t (subseq exported-session-key 0 5)))))
+       (md5 (usb8 skey magic-constant))))
     ((or negotiate-lm-key negotiate-datagram)
      (if negotiate-56
-         (usb8 (subseq session-key 0 7) #(#xa0))
-         (usb8 (subseq session-key 0 5) #(#xe5 #x38 #xb0))))
-    (t session-key)))
+         (usb8 (subseq exported-session-key 0 7) #(#xa0))
+         (usb8 (subseq exported-session-key 0 5) #(#xe5 #x38 #xb0))))
+    (t exported-session-key)))
 
-;; untested....
-(defun mac (msg sealing-key seqno &key (random-pad 0))
-  (let ((chksum (rc4 sealing-key (crc32 msg)))
-        (rpad (rc4 sealing-key (pack random-pad :uint32)))
-        (sno (unpack (rc4 sealing-key (pack 0 :uint32))
-		     :uint32)))
-    (pack-message-signature chksum (1+ (logxor sno seqno)) rpad)))
+;; 3.4.4.1 Without Extended Session Security http://msdn.microsoft.com/en-us/library/cc422953.aspx
+;; 3.4.4.2 With Extended Session Security http://msdn.microsoft.com/en-us/library/cc422954.aspx
+(defun mac (cipher msg signing-key seqnum 
+            &key (random-pad 0) negotiate-extended-sessionsecurity negotiate-key-exch)
+    (cond
+      (negotiate-extended-sessionsecurity
+       (let ((chksum (subseq (hmac-md5 signing-key (usb8 (pack seqnum :uint32) msg)) 0 8)))             
+         (values (pack-message-signature (if negotiate-key-exch
+                                             (rc4 cipher chksum)
+                                             chksum)
+                                         seqnum)
+                 (1+ seqnum))))
+      (t 
+       (let ((rpad (rc4 cipher (pack random-pad :uint32)))
+             (chksum (rc4 cipher (crc32 msg)))
+             (sno (rc4 cipher (usb8* 0 0 0 0))))
+         (declare (ignore rpad))
+         (values (pack-message-signature chksum (logxor (unpack sno :uint32) seqnum))
+                 (1+ seqnum))))))
     
-(defun encrypted-session-key (key-exchange-key session-key)
-  (rc4 key-exchange-key session-key))
+;; 3.1.5.1.2 Client Receives a CHALLENGE_MESSAGE from the Server 
+;; http://msdn.microsoft.com/en-us/library/cc236676.aspx
+(defun encrypted-session-key (key-exchange-key exported-session-key &key (negotiate-key-exch t))
+  (if negotiate-key-exch
+      (rc4k key-exchange-key exported-session-key)
+      (make-array 16 :initial-element 0 :element-type '(unsigned-byte 8))))
+
+;; 3.1.5.1.2 http://msdn.microsoft.com/en-us/library/cc236676.aspx
+(defun mic (exported-session-key negotiate-message challenge-message authenticate-message )
+  (hmac-md5 exported-session-key
+            (usb8 negotiate-message challenge-message authenticate-message)))
+
+
+(defun nonce (n)
+  (make-array n
+              :element-type '(unsigned-byte 8)
+              :initial-contents (loop for i below n collect (random 256))))
+
+(defun client-challenge ()
+  (nonce 8))
+
+(defun server-challenge ()
+  (nonce 8))
+
+;; 3.1.5.1.2 Client Receives a CHALLENGE_MESSAGE from the Server 
+;; http://msdn.microsoft.com/en-us/library/cc236676.aspx
+(defun exported-session-key (&key key-exchange-key negotiate-key-exch)
+  (cond
+    (negotiate-key-exch (nonce 16))
+    (key-exchange-key key-exchange-key)
+    (t (error "Must provide a key-exchange-key if not using :NEGOTIATE-KEY-EXCH"))))
+
+
+(defun channel-bindings (channel-bindings-unhashed)
+  (md5 channel-bindings-unhashed))
+
+

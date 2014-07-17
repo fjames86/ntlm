@@ -1,8 +1,20 @@
 
+;;;; NTLM Authentication library
+
+;;; 
+;;; Provides functions and data structures to handle the NTLM authentication protocol,
+;;; commonly used by Microsoft Windows platforms.
+;;; See http://msdn.microsoft.com/en-gb/library/cc236621.aspx for more information.
+;;;
+;;; Copyright (C) Frank James, July 2014
+;;;
+
+
 
 (defpackage :ntlm 
   (:use :cl :packet)
   (:export #:usb8
+           #:usb8*
 	   #:hd
 	   
 	   #:pack-negotiate-message
@@ -20,7 +32,9 @@
 	   #:md4
 	   #:md5
 	   #:crc32
+       #:rc4-init
 	   #:rc4
+       #:rc4k
 	   #:hmac-md5
 	   #:lmowf-v1
 	   #:ntowf-v1
@@ -29,17 +43,27 @@
 	   #:session-base-key-v1
 	   #:session-base-key-v2
 	   #:key-exchange-key
+       #:make-temp
 	   #:lm-response-v1
 	   #:nt-response-v1
 	   #:lm-response-v1*
 	   #:nt-response-v1*
 	   #:lm-response-v2
 	   #:nt-response-v2
+       #:nt-response-v2-list
 	   #:sign-key
 	   #:seal-key
 	   #:mac
 	   #:encrypted-session-key
-	   #:password-md4))
+	   #:password-md4
+       #:mic
+       #:client-challenge
+       #:server-challenge
+       #:nonce
+       #:exported-session-key
+       #:unix
+       #:filetime
+       #:filetime-unix))
 
 
 

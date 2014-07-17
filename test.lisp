@@ -1,4 +1,15 @@
 
+;;;; NTLM Authentication test suite
+
+;;; 
+;;; Follows the example calculations in http://msdn.microsoft.com/en-us/library/cc669094.aspx
+;;; and demonstrates an example HTTP client (drakma) and server (Hunchentoot) which support
+;;; the protocol.
+;;;
+;;; Copyright (C) Frank James, July 2014
+;;;
+
+
 
 (defpackage :ntlm-test
   (:use :cl :ntlm))
@@ -67,8 +78,8 @@
 ;; 4.2.2.2.3 Encrypted Session Key http://msdn.microsoft.com/en-us/library/cc669104.aspx
 (defun test-session-key ()
   (labels ((test (key-exchange-key)
-	     (encrypted-session-key key-exchange-key
-				    (usb8 *session-key*))))
+             (encrypted-session-key key-exchange-key
+                                    (usb8 *session-key*))))
     (hd (test (make-key-exchange-key :negotiate-lm-key nil)))
     (hd #(#x51 #x88 #x22 #xb1 #xb3 #xf3 #x50 #xc8 #x95 #x86 #x82 #xec #xbb #x3e #x3c #xb7))
     (terpri)
@@ -218,14 +229,17 @@
   (hd #(#x0c #x86 #x8a #x40 #x3b #xfd #x7a #x93 #xa3 #x00 #x1e #xf2 #x2e #xf0 #x2e #x3f)))
 
 ;; 4.2.4.1.3 Temp http://msdn.microsoft.com/en-us/library/hh880685.aspx
-(defun test-temp ()
-  (hd (ntlm::make-temp 0 (usb8 *client-challenge*) "Server" "Domain"))
-  (hd #(01 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00   
-	#xaa #xaa #xaa #xaa #xaa #xaa #xaa #xaa 00 00 00 00 02 00 #x0c 00 
-	#x44 00 #x6f 00 #x6d 00 #x61 00 #x69 00 #x6e 00 01 00 #x0c 00   
-	#x53 00 #x65 00 #x72 00 #x76 00 #x65 00 #x72 00 00 00 00 00   
-        00 00 00 00)))
-
+(defun test-temp (&optional print)
+  (let ((temp (ntlm::make-temp 0 (usb8 *client-challenge*) (make-target-info :nb-computer-name "Server" :nb-domain-name "Domain" :ordering '(:nb-domain-name :nb-computer-name)))))
+    (when print
+      (hd temp)
+      (hd #(01 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00   
+            #xaa #xaa #xaa #xaa #xaa #xaa #xaa #xaa 00 00 00 00 02 00 #x0c 00 
+            #x44 00 #x6f 00 #x6d 00 #x61 00 #x69 00 #x6e 00 01 00 #x0c 00   
+            #x53 00 #x65 00 #x72 00 #x76 00 #x65 00 #x72 00 00 00 00 00   
+            00 00 00 00)))
+    temp))
+  
 (defparameter *example-session-base-key-v2*
   '(#x8d #xe4 #x0c #xca #xdb #xc1 #x4a #x82 #xf1 #x5c #xb0 #xad #x0d #xe9 #x5c #xa3))
  
@@ -234,10 +248,7 @@
   (hd    
    (session-base-key-v2 (ntowf-v2 "User" "Domain" (password-md4 "Password"))
                         (usb8 *server-challenge*)
-                        (usb8 *client-challenge*)
-                        "Server"
-                        "Domain"
-                        0))
+                        (test-temp)))
   (hd (usb8 *example-session-base-key-v2*)))
 
 (defparameter *example-lmv2-response*
@@ -256,15 +267,12 @@
   '(#x68 #xcd #x0a #xb8 #x51 #xe5 #x1c #x96 #xaa #xbc #x92 #x7b #xeb #xef #x6a #x1c))
 
 ;; 4.2.4.2.2 NTLMv2 Response http://msdn.microsoft.com/en-us/library/cc669121.aspx
-(defun test-ntlmv2-response ()
+(defun test-ntlm-v2-response ()
   (hd
    (subseq 
     (nt-response-v2 (ntowf-v2 "User" "Domain" (password-md4 "Password"))
-		    (usb8 *server-challenge*)
-		    (usb8 *client-challenge*)
-		    "Server"
-		    "Domain"
-		    0)
+                    (usb8 *server-challenge*)
+                    (test-temp))
     0 16))
   (hd 
    (usb8 *example-ntlmv2-response*)))
@@ -279,10 +287,7 @@
     (key-exchange-key 
      (session-base-key-v2 (ntowf-v2 "User" "Domain" (password-md4 "Password"))
 			  (usb8 *server-challenge*)
-			  (usb8 *client-challenge*)
-			  "Server"
-			  "Domain"
-			  0)
+              (test-temp))
      (lm-response-v2 (lmowf-v2 "User" "Domain" (password-md4 "Password"))
 		     (usb8 *server-challenge*)
 		     (usb8 *client-challenge*))
@@ -315,8 +320,8 @@
                                  :target-name "Server"
                                  :version (make-ntlm-version 6 0 2600)
                                  :target-info (make-target-info 
-                                               :domain-name "Domain"
-                                               :computer-name "Server"))))
+                                               :nb-domain-name "Domain"
+                                               :nb-computer-name "Server"))))
     (hd msg)
     (hd (usb8 *example-challenge-message-v2*))
     (list
@@ -352,10 +357,7 @@
 				    :nt-response 
 				    (nt-response-v2 (ntowf-v2 "User" "Domain" (password-md4 "Password"))
 						    (usb8 *server-challenge*)
-						    (usb8 *client-challenge*)
-						    "Server"
-						    "Domain"
-						    0)
+                            (test-temp))
 				    :domain "Domain"
 				    :username "User"
 				    :workstation "COMPUTER"
@@ -364,10 +366,7 @@
 				     (key-exchange-key 
 				      (session-base-key-v2 (ntowf-v2 "User" "Domain" (password-md4 "Password"))
 							   (usb8 *server-challenge*)
-							   (usb8 *client-challenge*)
-							   "Server"
-							   "Domain"
-							   0)
+                               (test-temp))
 				      (lm-response-v2 (lmowf-v2 "User" "Domain" (password-md4 "Password"))
 						      (usb8 *server-challenge*)
 						      (usb8 *client-challenge*))
@@ -381,25 +380,229 @@
      (unpack-authenticate-message msg)
      (unpack-authenticate-message (usb8 *example-authenticate-message-v2*)))))
 
-  
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Drakma HTTP client
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 (defun b64-usb8 (string)
   (cl-base64:base64-string-to-usb8-array string))
 
 (defun usb8-b64 (usb8)
   (cl-base64:usb8-array-to-base64-string usb8))
 
-(defun test-http-request (uri)
-  (drakma:http-request uri
-                       :method :post
-                       :content "Hello"
-                       :additional-headers 
-                       `((:authorization . ,(format 
-                                             nil "Negotiate ~A" 
-                                             (usb8-b64 
-                                              (pack-negotiate-message *flags* 
-                                                                      :workstation "frank-lindev")))))))
+(defun authorization-header (msg)
+  "Format an AUTHORIZATION http header"
+  (format nil "Negotiate ~A" (cl-base64:usb8-array-to-base64-string msg)))
+
+(defun authorization-msg (auth-header)  
+  "Extract the binary message from the AUTHORIZATION header"
+  (cl-base64:base64-string-to-usb8-array 
+   (elt (nth-value 1 (cl-ppcre:scan-to-strings "Negotiate ([\\w=\\+/]+)" auth-header))
+        0)))
+
+;; http://msdn.microsoft.com/en-us/library/cc236676.aspx
+(defun generate-reply (challenge username domain computer-name password-md4 version)
+  "Generate an AUTHENTICATE message from the challenge"
+  (let* ((lmowf (lmowf-v2 username domain password-md4))
+         (ntowf (ntowf-v2 username domain password-md4))
+         (server-challenge (cdr (assoc :server-challenge challenge)))
+         (client-challenge (client-challenge))
+         (time (cdr (assoc :timestamp (cdr (assoc :target-info challenge)))))
+         (target-info-buffer (cdr (assoc :target-info-buffer challenge)))
+         (temp (make-temp time client-challenge target-info-buffer))
+         (lm-response (lm-response-v2 lmowf server-challenge client-challenge))
+         (nt-response (nt-response-v2 ntowf
+                                      server-challenge
+                                      temp))
+         (session-base-key (session-base-key-v2 ntowf 
+                                                server-challenge
+                                                temp))
+         (key-exchange-key (key-exchange-key session-base-key
+                                             lm-response
+                                             server-challenge
+                                             lmowf))
+         (exported-session-key (exported-session-key :negotiate-key-exch t
+                                                     :key-exchange-key key-exchange-key)))
+    (pack-authenticate-message (cdr (assoc :flags challenge))
+                               :lm-response lm-response
+                               :nt-response nt-response
+                               :domain domain
+                               :username username 
+                               :workstation computer-name
+                               :encrypted-session-key
+                               (encrypted-session-key key-exchange-key exported-session-key)
+                               :version version)))
+
+(defun test-http-request (uri keyword-args &key username domain password-md4 workstation version)
+  "Perform an HTTP request with NTLM authentication"
+  (multiple-value-bind (content status-code headers ruri stream must-close reason)
+      (apply #'drakma:http-request 
+             uri
+             :close nil
+             :keep-alive t
+             :additional-headers 
+             `((:authorization . ,(authorization-header 
+                                   (pack-negotiate-message *flags* 
+                                                           :workstation workstation
+                                                           :domain domain
+                                                           :version version))))
+             keyword-args)
+    (declare (ignore content ruri must-close reason status-code))
+    (let ((msg (authorization-msg (cdr (assoc :www-authenticate headers)))))
+      (apply #'drakma:http-request 
+             uri 
+             :stream stream
+             :additional-headers 
+             `((:authorization . ,(authorization-header
+                                   (generate-reply (unpack-challenge-message msg) 
+                                                   username domain workstation password-md4 version))))
+             keyword-args))))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Hunchentoot HTTP server
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+(defun generate-response (server-challenge target-name target-info version)
+  "Generate a CHALLENGE message"
+  (pack-challenge-message '(:NEGOTIATE-UNICODE :REQUEST-TARGET :NEGOTIATE-SIGN :NEGOTIATE-NTLM
+                            :NEGOTIATE-ALWAYS-SIGN :TARGET-TYPE-DOMAIN
+                            :NEGOTIATE-EXTENDED-SESSIONSECURITY :NEGOTIATE-TARGET-INFO :NEGOTIATE-VERSION
+                            :NEGOTIATE-128 :NEGOTIATE-KEY-EXCH :NEGOTIATE-56)
+                          server-challenge
+                          :target-name target-name
+                          :target-info target-info 
+                          :version version))
+                          
+(defun list-target-info (target-info-list)
+  "Make a target info from a list of targetinfo"
+  (let (ordering args)
+    (dolist (pair target-info-list)
+      (destructuring-bind (name . value) pair
+        (case name
+          (:single-host (setf value (ntlm::make-single-host :custom-data (cdr (assoc :custom-data value))
+                                                            :machine-id (cdr (assoc :machine-id value))))))
+        (push name ordering)
+        (setf args (append args (list name value)))))
+    (apply #'make-target-info :ordering (nreverse ordering) args)))
+
+;;;;;;;;;;;;;;;;;;;;;; 
+;; user accounts
+;;;;;;;;;;;;;;;;;;;;;;
+
+(defvar *password-database* (make-hash-table)
+  "Database of username/password hash pairs")
+
+(defun add-user (username password-md4)
+  "Add a new user account"
+  (let ((u (intern username :keyword)))
+    (setf (gethash u *password-database*)
+          password-md4)
+    u))
+
+(defun user-password-md4 (username)
+  "Get a user's hashed password"
+  (gethash (intern username :keyword)*password-database*))
+
+;; define a user
+(add-user "fjames" (password-md4 "jamesfrank"))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Authenticate user against the database
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defun authenticate (buffer server-challenge username domain)
+;;  (hunchentoot:log-message* "RSP" "~%~S~%" buffer)
+  (let ((nt-response (nt-response-v2-list buffer))
+        (password-md4 (user-password-md4 username)))
+;;    (hunchentoot:log-message* "NT" "~%~S~%" nt-response)
+    (when password-md4
+      (let ((client-response (cdr (assoc :nt-response nt-response)))
+            (server-response (subseq (nt-response-v2 (ntowf-v2 username domain password-md4)
+                                                     server-challenge
+                                                     (cdr (assoc :temp-buffer nt-response)))
+                                     0 16)))
+        ;;      (hunchentoot:log-message* "SCH" "~%~S~%" server-challenge)
+        ;;      (hunchentoot:log-message* "CLIENT" "~%~S~%" client-response)
+        ;;      (hunchentoot:log-message* "SERVER" "~%~S~%" server-response)
+        (every #'= client-response server-response)))))
 
 
 
-                                              
-                                                             
+(defclass test-acceptor (hunchentoot:acceptor)
+  ()
+  (:default-initargs :address nil))
+
+;; need to store a list of server challenges so that we can generate a server response
+;; to compare against the client response. we need to store the server challenge 
+;; for each connection because it is not sent through again with the AUTHENTICATE message
+(defparameter *auth-list* nil)
+(defun add-auth (from server-challenge)
+  (push (cons from server-challenge) *auth-list*))
+(defun rem-auth (from)
+  (setf *auth-list*
+        (remove from *auth-list* :key #'car :test #'string-equal)))
+(defun get-auth (from)
+  (prog1 (cdr (assoc from *auth-list* :test #'string-equal))
+    (rem-auth from)))
+  
+;; process a request
+(defmethod hunchentoot:acceptor-dispatch-request ((acc test-acceptor) req)
+  (let* ((headers (hunchentoot:headers-in*))
+         (authorization (cdr (assoc :authorization headers))))
+    (if authorization 
+        (let ((msg (authorization-msg authorization)))
+          (cond
+            ;; we don't know if this is a NEGOTIATE or AUTHENTICATE message
+            ;; so make a heuristic descision based on size of the message
+            ((> (length msg) (packet:type-size 'ntlm::authenticate-message))
+             (let ((amsg (unpack-authenticate-message msg)))
+               (hunchentoot:log-message* "AUTHENTICATE" "User: ~A" (cdr (assoc :username amsg)))
+
+               ;; should really validate the authentication here; for testing purposes just assume its ok
+               (if (authenticate (cdr (assoc :nt-response amsg))
+                                 (get-auth (hunchentoot:remote-addr*))
+                                 (cdr (assoc :username amsg))
+                                 (cdr (assoc :domain amsg)))
+                   (format nil "Hello ~A!!!" (cdr (assoc :username amsg)))
+                   (progn
+                     (setf (hunchentoot:return-code*) 
+                           hunchentoot:+http-authorization-required+)
+                     "Unauthorized"))))
+            (t 
+             (let ((negotiate-msg (unpack-negotiate-message msg))
+                   (server-challenge (server-challenge)))
+               (hunchentoot:log-message* "NEGOTIATE" "Workstation: ~A" (cdr (assoc :workstation negotiate-msg)))
+
+               ;; store the server challenge so that we know how to generate a response
+               (add-auth (hunchentoot:remote-addr*) server-challenge)
+
+               ;; set the out header
+               (setf (hunchentoot:header-out :WWW-AUTHENTICATE)
+                     (authorization-header (generate-response server-challenge 
+                                                              "HTTP/127.0.0.1"
+                                                              (make-target-info 
+                                                               :nb-computer-name "MyMachine" 
+                                                               :nb-domain-name (cdr (assoc :domain negotiate-msg))
+                                                               :timestamp (filetime))
+                                                              (make-ntlm-version 6 1 2600))))
+               (setf (hunchentoot:return-code*) 
+                     hunchentoot:+http-authorization-required+)
+               "Unauthorized"))))
+        (progn
+          (setf (hunchentoot:return-code*) 
+                hunchentoot:+http-authorization-required+)          
+          "Unauthorized"))))
+
+(defvar *acceptor* nil)
+
+(defun start-test-server (port)
+  (setf *acceptor* (make-instance 'test-acceptor :port port))
+  (hunchentoot:start *acceptor*))
+
+(defun stop-test-server ()
+  (hunchentoot:stop *acceptor*)
+  (setf *acceptor* nil))
+
