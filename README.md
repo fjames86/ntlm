@@ -53,7 +53,7 @@ Now instead let us start the Hunchentoot server and point a client at it:
                    :workstation "Computer" 
                    :password-md4 (password-md4 "Password") 
                    :version (make-ntlm-version 6 1 2600))
-"Hello fjames!!!"
+"Hello User!!!"
 200
 ((:CONTENT-LENGTH . "15") (:DATE . "Thu, 17 Jul 2014 11:03:54 GMT")
  (:SERVER . "Hunchentoot 1.2.27") (:CONNECTION . "Close")
