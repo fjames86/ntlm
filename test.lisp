@@ -397,9 +397,10 @@
 
 (defun authorization-msg (auth-header)  
   "Extract the binary message from the AUTHORIZATION header"
-  (cl-base64:base64-string-to-usb8-array 
-   (elt (nth-value 1 (cl-ppcre:scan-to-strings "Negotiate ([\\w=\\+/]+)" auth-header))
-        0)))
+  (let ((matches (nth-value 1 (cl-ppcre:scan-to-strings "Negotiate ([\\w=\\+/]+)" auth-header))))
+    (when (and matches (> (length matches) 0))
+      (b64-usb8 (elt matches 0)))))
+
 
 ;; http://msdn.microsoft.com/en-us/library/cc236676.aspx
 (defun generate-reply (challenge username domain computer-name password-md4 version)
@@ -450,14 +451,16 @@
              keyword-args)
     (declare (ignore content ruri must-close reason status-code))
     (let ((msg (authorization-msg (cdr (assoc :www-authenticate headers)))))
-      (apply #'drakma:http-request 
-             uri 
-             :stream stream
-             :additional-headers 
-             `((:authorization . ,(authorization-header
-                                   (generate-reply (unpack-challenge-message msg) 
-                                                   username domain workstation password-md4 version))))
-             keyword-args))))
+      (if msg
+	  (apply #'drakma:http-request 
+		 uri 
+		 :stream stream
+		 :additional-headers 
+		 `((:authorization . ,(authorization-header
+				       (generate-reply (unpack-challenge-message msg) 
+						       username domain workstation password-md4 version))))
+		 keyword-args)
+	  (error "No CHALLENGE response")))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -509,7 +512,7 @@
   (gethash (intern username :keyword) *password-database*))
 
 ;; define a user
-(add-user "fjames" (password-md4 "jamesfrank"))
+(add-user "User" (password-md4 "Password"))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Authenticate user against the database
@@ -534,58 +537,73 @@
 
 ;; store the server challenge in the acceptor
 (defclass test-acceptor (hunchentoot:acceptor)
-  ((server-challenge :initarg :server-challenge :initform nil :accessor acceptor-server-challenge)
-   (message-mode :initform :negotiate :accessor acceptor-message-mode))
+  ((conns :initform nil :accessor acceptor-conns))
   (:default-initargs :address nil))
   
+(defun add-acceptor-conn (acc remote-addr remote-port server-challenge)
+  (push (cons (intern (format nil "~A:~A" remote-addr remote-port) :keyword)
+	      server-challenge)
+	(acceptor-conns acc)))
+
+(defun acceptor-server-challenge (acc remote-addr remote-port)
+  (let ((key (intern (format nil "~A:~A" remote-addr remote-port) :keyword)))
+    (let ((pair (assoc key (acceptor-conns acc))))
+      (setf (acceptor-conns acc)
+	    (remove key (acceptor-conns acc) :key #'car))
+      (cdr pair))))
+
 ;; process a request
 (defmethod hunchentoot:acceptor-dispatch-request ((acc test-acceptor) req)
-  (let* ((headers (hunchentoot:headers-in*))
-         (authorization (cdr (assoc :authorization headers))))
-    (if authorization 
-        (let ((msg (authorization-msg authorization)))
-          (case (acceptor-message-mode acc)
-            (:authenticate
-             (let ((amsg (unpack-authenticate-message msg)))
-               (hunchentoot:log-message* "AUTHENTICATE" "User: ~A" (cdr (assoc :username amsg)))
-               
-               ;; validate the authentication
-               (if (authenticate (cdr (assoc :nt-response amsg))
-                                 (acceptor-server-challenge acc)
-                                 (cdr (assoc :username amsg))
-                                 (cdr (assoc :domain amsg)))
-                   (format nil "Hello ~A!!!" (cdr (assoc :username amsg)))
-                   (progn
-                     (setf (hunchentoot:return-code*) 
-                           hunchentoot:+http-authorization-required+)
-                     "Unauthorized"))))
-            (:negotiate
-             (let ((negotiate-msg (unpack-negotiate-message msg))
-                   (server-challenge (server-challenge)))
-               (hunchentoot:log-message* "NEGOTIATE" "Workstation: ~A" (cdr (assoc :workstation negotiate-msg)))
+  (labels ((auth-failed ()
+	     (setf (hunchentoot:return-code*) 
+		   hunchentoot:+http-authorization-required+)
+	     (return-from hunchentoot:acceptor-dispatch-request 
+	       "Unauthorized")))
+    (let* ((headers (hunchentoot:headers-in*))
+	   (authorization (cdr (assoc :authorization headers))))
+      (if authorization 
+	  (let ((msg (authorization-msg authorization))
+		(server-challenge (acceptor-server-challenge acc 
+							     (hunchentoot:remote-addr*) 
+							     (hunchentoot:remote-port*))))
+	    (cond
+	      (server-challenge 
+	       (let ((amsg (handler-case (unpack-authenticate-message msg)
+			     (error (err) 
+			       (hunchentoot:log-message* "ERROR" "~A" err)
+			       (auth-failed)))))
+		 (hunchentoot:log-message* "AUTHENTICATE" "User: ~A" (cdr (assoc :username amsg)))
+		 
+		 ;; validate the authentication
+		 (if (authenticate (cdr (assoc :nt-response amsg))
+				   server-challenge
+				   (cdr (assoc :username amsg))
+				   (cdr (assoc :domain amsg)))
+		     (format nil "Hello ~A!!!" (cdr (assoc :username amsg)))
+		     (auth-failed))))
+	      (t
+	       (let ((negotiate-msg (handler-case (unpack-negotiate-message msg)
+				      (error (err)
+					(hunchentoot:log-message* "ERROR" "~A" err)
+					(auth-failed))))
+		     (server-challenge (server-challenge)))
+		 (hunchentoot:log-message* "NEGOTIATE" "Workstation: ~A" (cdr (assoc :workstation negotiate-msg)))
+		 
+		 ;; store the server challenge so that we know how to generate a response
+		 (add-acceptor-conn acc (hunchentoot:remote-addr*) (hunchentoot:remote-port*) server-challenge)
+		 
+		 ;; set the out header
+		 (setf (hunchentoot:header-out :WWW-AUTHENTICATE)
+		       (authorization-header (generate-response server-challenge 
+								"HTTP/127.0.0.1"
+								(make-target-info 
+								 :nb-computer-name "MyMachine" 
+								 :nb-domain-name (cdr (assoc :domain negotiate-msg))
+								 :timestamp (filetime))
+								(make-ntlm-version 6 1 2600))))
+		 (auth-failed)))))
+	  (auth-failed)))))
 
-               ;; store the server challenge so that we know how to generate a response
-               (setf (acceptor-server-challenge acc) server-challenge)
-               
-               ;; set to the next mode
-               (setf (acceptor-message-mode acc) :authenticate)
-
-               ;; set the out header
-               (setf (hunchentoot:header-out :WWW-AUTHENTICATE)
-                     (authorization-header (generate-response server-challenge 
-                                                              "HTTP/127.0.0.1"
-                                                              (make-target-info 
-                                                               :nb-computer-name "MyMachine" 
-                                                               :nb-domain-name (cdr (assoc :domain negotiate-msg))
-                                                               :timestamp (filetime))
-                                                              (make-ntlm-version 6 1 2600))))
-               (setf (hunchentoot:return-code*) 
-                     hunchentoot:+http-authorization-required+)
-               "Unauthorized"))))
-        (progn
-          (setf (hunchentoot:return-code*) 
-                hunchentoot:+http-authorization-required+)          
-          "Unauthorized"))))
 
 (defvar *acceptor* nil)
 

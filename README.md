@@ -24,7 +24,7 @@ Usage
 
 * Each message type has a pack- and unpack- function used to create a buffer and extract meaningful information from a buffer
 * In test.lisp there is an example HTTP client and server (drakma/hunchentoot) showing how to use the functionality exported from the Lisp NTLM library
-* Other transport protocols could be used (it is even possible to use a version of NTLM over UDP, although this is currently untested)
+* Other transport protocols could be used (it is even possible to use a connection-less version of NTLM, although this is currently untested)
 
 Example
 --------
@@ -69,8 +69,9 @@ Try pointing your own Windows HTTP client at it (it works!).
 TODO
 --------
 
+* Needs much more error checking, e.g. analyzing the flags to make sure information is present
 * The HTTP client/server could be added into drakma/hunchentoot?
-
+* There are several different versions of "NTLM": v1, v2, with session security etc. These should all be handled seamlessly.
 
 Frank James
 July 2014

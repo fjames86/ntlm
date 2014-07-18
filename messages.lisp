@@ -517,9 +517,11 @@ Specify the ordering of the AV_PAIR objects if required."
         (offset (type-size 'negotiate-message)))
 
     ;; version
-    (when version
-      (setf vbuff (pack version 'ntlm-version)
-	    offset (+ offset (type-size 'ntlm-version))))
+    (when (member :negotiate-version flags)
+      (if version
+	  (setf vbuff (pack version 'ntlm-version)
+		offset (+ offset (type-size 'ntlm-version)))
+	  (error "Must supply version when NEGOTIATE-VERSION is specified")))
 
     ;; when supplied a domain
     (when domain
@@ -560,11 +562,14 @@ Specify the ordering of the AV_PAIR objects if required."
       (setf (negotiate-message-flags msg) flags)
       
       ;; version
-      (if (member :NEGOTIATE-VERSION (negotiate-message-flags msg))
-	  (setf (slot-value msg 'version)
-		(ntlm-version-list (unpack (subseq payload 0 (type-size 'ntlm-version))
-					   'ntlm-version)))
-	  (setf (slot-value msg 'version) nil))
+      (cond
+	((not (member :NEGOTIATE-VERSION (negotiate-message-flags msg)))
+	 (setf (slot-value msg 'version) nil))
+	((>= (length payload) (type-size 'ntlm-version))
+	 (setf (slot-value msg 'version)
+	       (ntlm-version-list (unpack (subseq payload 0 (type-size 'ntlm-version))
+					  'ntlm-version))))
+	(t (error "NEGOTIATE-VERSION flag specified but not enough space for ntlm-version ~S" payload)))
 
       ;; domain
       (let ((dfield (negotiate-message-domain-field msg)))
@@ -634,9 +639,11 @@ TARGET-INFO should be the result of calling make-target-info."
 	(vbuff nil))
 
     ;; version
-    (when version
-      (setf vbuff (pack version 'ntlm-version)
-	    offset (+ offset (type-size 'ntlm-version))))
+    (when (member :negotiate-version flags)
+      (if version
+	  (setf vbuff (pack version 'ntlm-version)
+		offset (+ offset (type-size 'ntlm-version)))
+	  (error "Must supply version when NEGOTIATE-VERSION flag specified")))
 
     ;; target-name 
     (when target-name
@@ -782,12 +789,14 @@ MIC is optional and can be ignored. It should be the result of calling mic."
         (offset (type-size 'authenticate-message))
         (footer nil))
 
-    (when version
-      (let ((buff (pack version 'ntlm-version)))
-	(setf offset 
-	      (+ offset (length buff))
-	      footer
-	      (usb8 footer buff))))
+    (when (member :negotiate-version flags)
+      (if version
+	  (let ((buff (pack version 'ntlm-version)))
+	    (setf offset 
+		  (+ offset (length buff))
+		  footer
+		  (usb8 footer buff)))
+	  (error "Must supply version when NEGOTIATE-VERSION flag specified")))
 
     (when mic
       (setf offset
@@ -887,8 +896,7 @@ MIC is optional and can be ignored. It should be the result of calling mic."
       
       ;; mic
       ;; FIXME: extract the MIC somehow? It's not easy to do because in some versions of Windows 
-      ;; it isn't present and there is no information in the flags to say whether its there.
-      ;; for the moment we must ignore it I think
+      ;; it isn't present
       ;; The MIC field is omitted in Windows NT, Windows 2000, Windows XP, and Windows Server 2003.
       (setf (slot-value msg 'mic) nil)
       
