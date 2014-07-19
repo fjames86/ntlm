@@ -6,6 +6,9 @@
 ;;; and demonstrates an example HTTP client (drakma) and server (Hunchentoot) which support
 ;;; the protocol.
 ;;;
+;;; Depends on the packages DRAKMA and HUNCHENTOOT. Load these first, by e.g. 
+;;; (ql:quickload "drakma") (ql:quickload "hunchentoot")
+;;;
 ;;; Copyright (C) Frank James, July 2014
 ;;;
 
