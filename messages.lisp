@@ -10,12 +10,6 @@
 ;;; Copyright (C) Frank James, July 2014
 ;;;
 
-
-
-
-
-
-
 (in-package :ntlm)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -32,7 +26,7 @@
   (let ((gvar (gensym)))
     `(dolist (,gvar ,list)
        (destructuring-bind ,lambda-list ,gvar ,@body))))
-
+#|
 (defun split-powers-2 (num)
   (do ((i 0 (1+ i))
        (n nil))
@@ -41,80 +35,7 @@
       (unless (zerop (logand num p))
         (push i n)
         (setf num (logand num (lognot p)))))))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Flags 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defmacro defflags (name flags &optional documentation)
-  "Macro to define a set of flags"
-  `(defparameter ,name
-     (list ,@(mapcar (lambda (flag)
-                       (destructuring-bind (n v &optional doc) flag
-                         (let ((gv (gensym)))
-                           `(let ((,gv ,v))
-                              (list ',n (ash 1 ,gv) ,gv ,doc)))))
-                     flags))
-     ,documentation))
-
-(defun pack-flags (flag-names flags)
-  "Combine flags"
-  (let ((f 0))
-    (dolist (flag-name flag-names)
-      (let ((n (cadr (assoc flag-name flags))))
-        (unless n (error "Flag ~S not found" flag-name))
-        (setf f (logior f n))))
-    f))
-
-(defun unpack-flags (number flags)
-  "Split the number into its flags."
-  (let ((f nil)
-        (num number))
-    (dolist (flag flags)
-      (let ((n (cadr flag)))
-        (unless (zerop (logand number n))
-          (push (car flag) f)
-          (setf num (logand num (lognot n))))))
-    (unless (zerop num)
-      (warn "Input flags ~S remainder ~S" number num))
-;;    (assert (zerop number))
-    f))
-
-(defun flag-p (number flag-name flags)
-  (let ((flag (assoc flag-name flags)))
-    (unless flag (error "No flag ~S" flag-name))
-    (not (zerop (logand number (cadr flag))))))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Enums 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-         
-(defmacro defenum (name enums)
-  `(defparameter ,name
-     (list ,@(let ((i 0)) 
-                  (mapcar (lambda (enum)
-                            (cond 
-                              ((symbolp enum)
-                               (prog1 `(list ',enum ,i)
-                                 (incf i)))
-                              (t 
-                               (destructuring-bind (n v) enum
-                                 (prog1 `(list ',n ,v)
-                                   (setf i (1+ v)))))))
-                          enums)))))
-
-(defun enum-p (number enum enums)
-  (let ((e (assoc enum enums)))
-    (unless e (error "No such enum ~S" enum))
-    (= number (cadr e))))
-
-(defun enum (enum enums)
-  (let ((e (assoc enum enums)))
-    (unless e (error "No such enum ~S" enum))
-    (cadr e)))
-
-(defun enum-id (number enums)
-  (car (find number enums :key #'cadr)))
-
+|#
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Negotiate flags
