@@ -33,23 +33,6 @@
     `(dolist (,gvar ,list)
        (destructuring-bind ,lambda-list ,gvar ,@body))))
 
-(defun subseq* (sequence start &optional len)
-  (subseq sequence start (when len (+ start len))))
-
-(defun pad (array len)
-  (let* ((l (length array))
-         (arr (make-array (max len l) :initial-element 0 :element-type '(unsigned-byte 8))))
-    (dotimes (i (length arr))
-      (when (< i l)
-        (setf (elt arr i) (elt array i))))
-    arr))
-          
-(defun substr (string start &optional end)
-  (let ((len (length string)))
-    (if (> start len)
-        ""
-        (subseq string start (when end (max end len))))))
-
 (defun split-powers-2 (num)
   (do ((i 0 (1+ i))
        (n nil))
@@ -58,41 +41,6 @@
       (unless (zerop (logand num p))
         (push i n)
         (setf num (logand num (lognot p)))))))
-
-(defun hd (data)
-  "Hexdump output"
-  (let ((lbuff (make-array 16))
-        (len (length data)))
-    (labels ((pline (lbuff count)
-               (dotimes (i count)
-                 (format t " ~2,'0X" (svref lbuff i)))
-               (dotimes (i (- 16 count))
-                 (format t "   "))
-
-               (format t " | ")
-               (dotimes (i count)
-                 (let ((char (code-char (svref lbuff i))))
-                   (format t "~C" 
-                           (if (graphic-char-p char) char #\.))))
-               (terpri)))
-      (do ((pos 0 (+ pos 16)))
-          ((>= pos len))
-        (let ((count (min 16 (- len pos))))
-          (dotimes (i count)
-            (setf (svref lbuff i) (elt data (+ pos i))))
-          (format t "; ~8,'0X:  " pos)
-          (pline lbuff count))))))
-
-
-(defun usb8 (&rest sequences)
-  "Make an (unsigned byte 8) vector from the sequences"
-  (apply #'concatenate '(vector (unsigned-byte 8)) sequences))
-
-(defun usb8* (&rest numbers)
-  "Make an (unsigned-byte 8) vector from the numbers"
-  (make-array (length numbers)
-              :element-type '(unsigned-byte 8)
-              :initial-contents numbers))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Flags 

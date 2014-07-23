@@ -177,7 +177,7 @@
 ;; 3.3.2 NTLM v2 Authentication http://msdn.microsoft.com/en-us/library/cc236700.aspx
 (defun make-temp (time client-challenge target-info)
   (usb8 '(1 1 0 0 0 0 0 0) 
-	(pack time :uint64)
+	(when time (pack time :uint64))
 	client-challenge 
 	'(0 0 0 0) 
     (if (arrayp target-info)

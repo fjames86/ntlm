@@ -13,10 +13,7 @@
 
 (defpackage :ntlm 
   (:use :cl :packet)
-  (:export #:usb8
-           #:usb8*
-	   #:hd
-	   
+  (:export	   
 	   #:pack-negotiate-message
 	   #:unpack-negotiate-message
 	   #:pack-challenge-message
@@ -26,6 +23,7 @@
 
 	   #:make-ntlm-version
 	   #:make-target-info
+       #:make-single-host
 
 	   #:des
 	   #:desl
