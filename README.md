@@ -55,44 +55,27 @@ NTLM> (glass:accept-security-context *server-context* *buffer*)
 
 ```
 
-## 3. Example
+## 3. Local database
+In order for your server to authenticate the client, it needs to somehow validate the client's request
+by comparing the challenge we sent to the client and what we received. This requires knowledge of the client's 
+password MD4 hash. One possibility is to proxy the call out to the local domain controller (Active Directory),
+this lies beyond the scope of this tool.
 
-The library was developed and tested against a client and server written in C, using the windows HTTP client and server APIs.
+Instead the default GSS methods require access to a local shared database of username passwords, 
+which are stored on disk. All users which can be authenticated MUST have an entry added to this database.
 
-Let us assume there is such a server running on localhost, port 8000:
 
 ```
-(test-http-request "http://localhost:8000/hello" 
-                   (list :content "Hello" :method :post) 
-                   :username "User" 
-                   :domain "Domain" 
-                   :workstation "Computer" 
-                   :password-md4 (password-md4 "Password") 
-                   :version (make-ntlm-version 6 1 2600))
+CL-USER> (ntlm:open-ntlm-database)
+CL-USER> (ntlm:add-ntlm-user "User1" "1234")
+CL-USER> (ntlm:add-ntlm-user "User2" "5555")
+CL-USER> (ntlm:list-ntlm-users)
+((:NAME "User1" :PASSWORD "1234") (:NAME "User2" :PASSWORD "5555"))
+CL-USER> (ntlm:remove-ntlm-user "User1")
+CL-USER> (ntlm:list-ntlm-users)
+((:NAME "User2" :PASSWORD "5555"))
 ```
 
-Now instead let us start the Hunchentoot server and point a client at it:
-```
-(start-test-server 8000)
-(test-http-request "http://localhost:8000/hello" 
-                   (list :content "Hello" :method :post) 
-                   :username "User" 
-                   :domain "Domain" 
-                   :workstation "Computer" 
-                   :password-md4 (password-md4 "Password") 
-                   :version (make-ntlm-version 6 1 2600))
-"Hello User!!!"
-200
-((:CONTENT-LENGTH . "15") (:DATE . "Thu, 17 Jul 2014 11:03:54 GMT")
- (:SERVER . "Hunchentoot 1.2.27") (:CONNECTION . "Close")
- (:CONTENT-TYPE . "text/html; charset=utf-8"))
-#<PURI:URI http://localhost:8000/hello>
-#<FLEXI-STREAMS:FLEXI-IO-STREAM {26185059}>
-T
-"OK"
-```
-
-Try pointing your own Windows HTTP client at it (it works!).
 
 ## 4. TODO
 

@@ -29,7 +29,8 @@
         
 (defclass ntlm-context ()
   ((user :initarg :user :initform nil :reader ntlm-context-user)
-   (domain :initarg :domain :initform nil :reader ntlm-context-domain)))
+   (domain :initarg :domain :initform nil :reader ntlm-context-domain)
+   (challenge :initarg :challenge :initform nil :reader ntlm-context-server-challenge)))
 
 (defmethod glass:initialize-security-context ((context ntlm-context) &key buffer)
   ;; we have received a CHALLENGE message, generate an AUTHENTICATE response
@@ -63,12 +64,14 @@
 
 (defmethod glass:accept-security-context ((creds ntlm-credentials) buffer &key)
   ;; the buffer is an initial NEGOTIATE message
-  (let ((neg (unpack-negotiate-message buffer)))
+  (let ((neg (unpack-negotiate-message buffer))
+        (challenge (server-challenge)))
     (declare (ignore neg))
     ;; generate a challenge message
-    (values (make-instance 'ntlm-context)
+    (values (make-instance 'ntlm-context
+                           :challenge challenge)
             (pack-challenge-message *default-flags*
-                                    (server-challenge)
+                                    challenge
                                     :target-name (machine-instance)
                                     :version (make-ntlm-version 6 1 1)
                                     :target-info 
@@ -256,7 +259,7 @@
   ;; the buffer is an AUTHENTICATE message, validate the user against the local database 
   (let ((amsg (unpack-authenticate-message buffer)))
     (when (authenticate (cdr (assoc :nt-response amsg))
-                        (server-challenge)
+                        (ntlm-context-server-challenge context)
                         (cdr (assoc :username amsg))
                         (cdr (assoc :domain amsg)))
       (values (make-instance 'ntlm-context
