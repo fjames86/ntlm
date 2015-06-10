@@ -61,9 +61,9 @@ by comparing the challenge we sent to the client and what we received. This requ
 password MD4 hash. One possibility is to proxy the call out to the local domain controller (Active Directory),
 this lies beyond the scope of this tool.
 
-Instead the default GSS methods require access to a local shared database of username passwords, 
-which are stored on disk. All users which can be authenticated MUST have an entry added to this database.
-
+Instead this library users a custom local shared database of usernames and passwords, 
+which are stored in plain text on disk. All users which can be authenticated MUST have an entry added to this database.
+The GSS methods to authenticate calls use this database to lookup passwords to compare against.
 
 ```
 CL-USER> (ntlm:open-ntlm-database)
