@@ -42,10 +42,10 @@
                            (ntowf-v2 (ntlm-user *default-ntlm-values*)
                                      (ntlm-domain *default-ntlm-values*)
                                      (ntlm-password *default-ntlm-values*))
-                           (slot-value challenge 'server-challenge)
+                           (cdr (assoc :server-challenge challenge))
                            (make-temp 
                             0 
-                            (slot-value challenge 'server-challenge)
+			    (cdr (assoc :server-challenge challenge))
                             (make-target-info :nb-computer-name (machine-instance)
                                               :nb-domain-name (ntlm-domain *default-ntlm-values*)
                                               :ordering '(:nb-domain-name :nb-computer-name))))
@@ -148,6 +148,7 @@
       (write-sequence octets stream))))
 
 (defun add-ntlm-user (username password)
+  "Add a new entry into the local database."
   ;; walk the list until we find an unused entry 
   (let (count)
     (pounds:with-locked-mapping (*ntlm-stream*)
@@ -185,6 +186,7 @@
     nil))
     
 (defun find-ntlm-user (username)
+  "Lookup the named user's password."
   (let (count)
     (pounds:with-locked-mapping (*ntlm-stream*)
       (setf count (database-count))
@@ -197,6 +199,7 @@
   nil)
 
 (defun list-ntlm-users ()
+  "List all entries in the user database."
   (let (count users)
     (pounds:with-locked-mapping (*ntlm-stream*)
       (setf count (database-count))
@@ -211,6 +214,7 @@
   
 
 (defun remove-ntlm-user (username)
+  "Delete the named user from the local database."
   (let (count)
     (pounds:with-locked-mapping (*ntlm-stream*)
       (setf count (database-count))
@@ -227,6 +231,7 @@
 
 
 (defun logon-user (username password &optional (domain ""))
+  "Logon the current user using the USERNAME and PASSWORD." 
   (declare (type string username password domain))
   (open-ntlm-database)
   (setf *default-ntlm-values*
@@ -258,14 +263,15 @@
 (defmethod glass:accept-security-context ((context ntlm-context) buffer &key)
   ;; the buffer is an AUTHENTICATE message, validate the user against the local database 
   (let ((amsg (unpack-authenticate-message buffer)))
-    (when (authenticate (cdr (assoc :nt-response amsg))
-                        (ntlm-context-server-challenge context)
-                        (cdr (assoc :username amsg))
-                        (cdr (assoc :domain amsg)))
-      (values (make-instance 'ntlm-context
-                             :user (cdr (assoc :username amsg))
-                             :domain (cdr (assoc :domain amsg)))
-              nil))))
+    (if (authenticate (cdr (assoc :nt-response amsg))
+		      (ntlm-context-server-challenge context)
+		      (cdr (assoc :username amsg))
+		      (cdr (assoc :domain amsg)))
+	(values (make-instance 'ntlm-context
+			       :user (cdr (assoc :username amsg))
+			       :domain (cdr (assoc :domain amsg)))
+		nil)
+	(error 'glass:gss-error :major :failure))))
 
 (defmethod glass:context-principal-name ((context ntlm-context) &key)
   (format nil "~A@~A" (ntlm-context-user context) (ntlm-context-domain context)))
