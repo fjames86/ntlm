@@ -28,7 +28,8 @@
 (defvar *default-ntlm-values* nil)
         
 (defclass ntlm-context ()
-  ())
+  ((user :initarg :user :initform nil :reader ntlm-context-user)
+   (domain :initarg :domain :initform nil :reader ntlm-context-domain)))
 
 (defmethod glass:initialize-security-context ((context ntlm-context) &key buffer)
   ;; we have received a CHALLENGE message, generate an AUTHENTICATE response
@@ -228,7 +229,8 @@
   (setf *default-ntlm-values*
         (make-ntlm :user username
                    :password (password-md4 password)
-                   :domain domain)))
+                   :domain domain))
+  nil)
 
 ;; ------------------------
 
@@ -257,6 +259,12 @@
                         (server-challenge)
                         (cdr (assoc :username amsg))
                         (cdr (assoc :domain amsg)))
-      (values (make-instance 'ntlm-context)
+      (values (make-instance 'ntlm-context
+                             :user (cdr (assoc :username amsg))
+                             :domain (cdr (assoc :domain amsg)))
               nil))))
+
+(defmethod glass:context-principal-name ((context ntlm-context) &key)
+  (format nil "~A@~A" (ntlm-context-user context) (ntlm-context-domain context)))
+
 
