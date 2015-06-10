@@ -61,7 +61,19 @@
        #:exported-session-key
        #:unix
        #:filetime
-       #:filetime-unix))
+       #:filetime-unix
+
+       ;; new GSS interface
+       #:logon-user
+       #:find-ntlm-user
+       #:remove-ntlm-user
+       #:add-ntlm-user
+       #:list-ntlm-users
+       #:open-ntlm-database
+       #:close-ntlm-database
+       #:*ntlm-database-path*
+
+       ))
 
 
 
