@@ -1,8 +1,17 @@
+;;;; Copyright (c) Frank James 2015 <frank.a.james@gmail.com>
+;;;; This code is licensed under the MIT license.
+
+;;; This shows how you might write an HTTP client that does NTLM authentication
+;;; You need drakma and cl-base64 systems.
+;;; Try pointing the client at the HTTP server provided by server.c. 
 
 (defpackage #:ntlm.example
   (:use #:cl))
 
 (in-package #:ntlm.example)
+
+;; before running this you must first set things up by calling
+;; (ntlm:logon-user "username" "password" "domain")
 
 (defun send-ntlm-http-request (&optional (url "http://localhost:2001/"))
   (let ((creds (gss:acquire-credentials :ntlm nil)))
