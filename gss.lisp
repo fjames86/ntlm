@@ -32,34 +32,50 @@
    (domain :initarg :domain :initform nil :reader ntlm-context-domain)
    (challenge :initarg :challenge :initform nil :reader ntlm-context-server-challenge)))
 
-(defmethod glass:initialize-security-context ((context ntlm-context) &key buffer)
-  ;; we have received a CHALLENGE message, generate an AUTHENTICATE response
-  (let ((challenge (unpack-challenge-message buffer)))
-    (values (make-instance 'ntlm-context :challenge challenge)
-            (pack-authenticate-message 
-             *default-flags*
-             :nt-response (nt-response-v2 
-                           (ntowf-v2 (ntlm-user *default-ntlm-values*)
-                                     (ntlm-domain *default-ntlm-values*)
-                                     (ntlm-password *default-ntlm-values*))
-                           (cdr (assoc :server-challenge challenge))
-                           (make-temp 
-                            0 
-			    (cdr (assoc :server-challenge challenge))
-                            (make-target-info :nb-computer-name (machine-instance)
-                                              :nb-domain-name (ntlm-domain *default-ntlm-values*)
-                                              :ordering '(:nb-domain-name :nb-computer-name))))
-             :domain (ntlm-domain *default-ntlm-values*)
-             :username (ntlm-user *default-ntlm-values*)
-             :workstation (machine-instance)
-             :version (make-ntlm-version 6 1 1)))))
-
 (defmethod glass:initialize-security-context ((creds ntlm-credentials) &key)
   (values (make-instance 'ntlm-context)
           (pack-negotiate-message *default-flags* 
                                   :workstation (machine-instance)
                                   :domain (ntlm-domain *default-ntlm-values*)
                                   :version (make-ntlm-version 6 1 1))))
+
+(defmethod glass:initialize-security-context ((context ntlm-context) &key buffer)
+  ;; we have received a CHALLENGE message, generate an AUTHENTICATE response
+  (let* ((username (ntlm-user *default-ntlm-values*))
+         (domain (ntlm-domain *default-ntlm-values*))
+         (password-md4 (ntlm-password *default-ntlm-values*))
+         (challenge (unpack-challenge-message buffer))
+         (lmowf (lmowf-v2 username domain password-md4))
+         (ntowf (ntowf-v2 username domain password-md4))
+         (server-challenge (cdr (assoc :server-challenge challenge)))
+         (client-challenge (client-challenge))
+         (time (cdr (assoc :timestamp (cdr (assoc :target-info challenge)))))
+         (target-info-buffer (cdr (assoc :target-info-buffer challenge)))
+         (temp (make-temp time client-challenge target-info-buffer))
+         (lm-response (lm-response-v2 lmowf server-challenge client-challenge))
+         (nt-response (nt-response-v2 ntowf
+                                      server-challenge
+                                      temp))
+         (session-base-key (session-base-key-v2 ntowf 
+                                                server-challenge
+                                                temp))
+         (key-exchange-key (key-exchange-key session-base-key
+                                             lm-response
+                                             server-challenge
+                                             lmowf))
+         (exported-session-key (exported-session-key :negotiate-key-exch t
+                                                     :key-exchange-key key-exchange-key)))
+    
+      (values (make-instance 'ntlm-context :challenge challenge)
+              (pack-authenticate-message 
+               *default-flags*
+               :lm-response lm-response
+               :nt-response nt-response 
+               :domain domain
+               :username username
+               :workstation (machine-instance)
+               :version (make-ntlm-version 6 1 1)
+               :encrypted-session-key (encrypted-session-key key-exchange-key exported-session-key)))))
 
 
 (defmethod glass:accept-security-context ((creds ntlm-credentials) buffer &key)
@@ -149,6 +165,7 @@
 
 (defun add-ntlm-user (username password)
   "Add a new entry into the local database."
+  (open-ntlm-database)
   ;; walk the list until we find an unused entry 
   (let (count)
     (pounds:with-locked-mapping (*ntlm-stream*)
@@ -187,6 +204,7 @@
     
 (defun find-ntlm-user (username)
   "Lookup the named user's password."
+  (open-ntlm-database)
   (let (count)
     (pounds:with-locked-mapping (*ntlm-stream*)
       (setf count (database-count))
@@ -200,6 +218,7 @@
 
 (defun list-ntlm-users ()
   "List all entries in the user database."
+  (open-ntlm-database)
   (let (count users)
     (pounds:with-locked-mapping (*ntlm-stream*)
       (setf count (database-count))
@@ -215,6 +234,7 @@
 
 (defun remove-ntlm-user (username)
   "Delete the named user from the local database."
+  (open-ntlm-database)
   (let (count)
     (pounds:with-locked-mapping (*ntlm-stream*)
       (setf count (database-count))
@@ -230,9 +250,10 @@
   nil)
 
 
-(defun logon-user (username password &optional (domain ""))
+(defun logon-user (username password &optional domain)
   "Logon the current user using the USERNAME and PASSWORD." 
-  (declare (type string username password domain))
+  (declare (type string username password)
+           (type (or string null) domain))
   (open-ntlm-database)
   (setf *default-ntlm-values*
         (make-ntlm :user username
@@ -271,7 +292,7 @@
 			       :user (cdr (assoc :username amsg))
 			       :domain (cdr (assoc :domain amsg)))
 		nil)
-	(error 'glass:gss-error :major :failure))))
+	(error 'glass:gss-error :major :defective-credential))))
 
 (defmethod glass:context-principal-name ((context ntlm-context) &key)
   (format nil "~A@~A" (ntlm-context-user context) (ntlm-context-domain context)))

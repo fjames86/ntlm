@@ -637,3 +637,95 @@
   (hunchentoot:stop *acceptor*)
   (setf *acceptor* nil))
 
+
+
+;; -----------------------------------------------------
+
+
+
+;; this is a simpler example which sends the buffers over a socket, you can use e.g. a windows machine to 
+;; test against the SSPI equivalents.
+
+(defun send-negotiate-1 (&optional host port)
+  (let* ((socket (usocket:socket-connect (or host "localhost") (or port 2000)
+                                        :element-type '(unsigned-byte 8)))
+         (stream (usocket:socket-stream socket)))
+    (unwind-protect 
+         (let ((creds (gss:acquire-credentials :ntlm nil)))
+           (format t "Initializing context~%")
+           (multiple-value-bind (context buffer) (gss:initialize-security-context creds)
+             (nibbles:write-ub32/le (length buffer) stream)
+             (write-sequence buffer stream)
+             (force-output stream)
+             (format t "Reading response~%")
+             ;; read the response 
+             (let ((n (nibbles:read-ub32/le stream)))
+               (let ((resp-buffer (nibbles:make-octet-vector n)))
+                 (read-sequence resp-buffer stream)
+                 ;; do the next stage 
+                 (format t "Authenticating~%")
+                 (multiple-value-bind (context buffer) (gss:initialize-security-context context :buffer resp-buffer)
+                   (declare (ignore context))
+                   ;; send back to server
+                   (nibbles:write-ub32/le (length buffer) stream)
+                   (write-sequence buffer stream)
+                   ;; we are done
+                   (format t "Done~%"))))))
+      (usocket:socket-close socket))))
+                 
+
+(defun authorization-msg (auth-header)  
+  "Extract the binary message from the AUTHORIZATION header"
+  (let ((matches (nth-value 1 (cl-ppcre:scan-to-strings "NTLM ([\\w=\\+/]+)" auth-header))))
+    (when (and matches (> (length matches) 0))
+      (b64-usb8 (elt matches 0)))))
+
+
+(defun send-ntlm-http-request (&optional (url "http://localhost:2001/"))
+  (let ((creds (gss:acquire-credentials :ntlm nil)))
+    (multiple-value-bind (context buffer) (gss:initialize-security-context creds)
+      ;; start by sending a regular request 
+      (multiple-value-bind (content status-code headers ruri stream must-close reason)
+          (drakma:http-request url
+                               :additional-headers 
+                               `((:authorization . ,(format nil 
+                                                            "NTLM ~A" 
+                                                            (cl-base64:usb8-array-to-base64-string buffer))))
+                               :keep-alive t 
+                               :close nil)
+        (declare (ignore ruri must-close))
+        (case status-code
+          (200 (format t "SUCCESS~%")
+               (format t "CONTENT:~%")
+               (format t "~S~%" content))
+          (401 (format t "INITIAL UNAUTHORIZED ~A~%~%" reason)
+               ;; extract the WWW-AUTHENTICATE header
+               (let ((www (cdr (assoc :www-authenticate headers))))
+                 (unless www (error "No WWW-AUTHENTICATE header"))
+                 ;; get the buffer from the base64 encoded string 
+                 (let ((matches (nth-value 1 (cl-ppcre:scan-to-strings "NTLM ([\\w=\\+/]+)" www))))
+                   (unless matches (error "Not an NTLM authenticate message"))
+                   (format t "WWW-AUTHENTICATE: ~A~%~%" (elt matches 0))
+                   (multiple-value-bind (context buffer)                        
+                       (gss:initialize-security-context context
+                                                        :buffer 
+                                                        (cl-base64:base64-string-to-usb8-array (elt matches 0)))
+                     (declare (ignore context))
+                     (format t "AUTHORIZATION: ~A~%~%" (format nil "NTLM ~A"
+                                                             (cl-base64:usb8-array-to-base64-string buffer)))
+                     (multiple-value-bind (content status-code headers ruri stream must-close reason)
+                         (drakma:http-request url
+                                              :additional-headers 
+                                              `((:authorization . ,(format nil "NTLM ~A"
+                                                                           (cl-base64:usb8-array-to-base64-string buffer))))
+                                              :stream stream)
+                       (declare (ignore must-close ruri stream headers))
+                       (case status-code 
+                         (200 (format t "SUCCESS~%")
+                              (format t "CONTENT: ~%")
+                              (format t "~S~%" content))
+                         (otherwise (format t "FAILED ~A ~A~%" status-code reason))))))))
+          (otherwise (format t "FAILED: ~A~%" reason)))))))
+
+
+           
