@@ -8,8 +8,11 @@
 (defclass ntlm-credentials ()
   ())
 
+(defvar *default-ntlm-values* nil)
+
 (defmethod glass:acquire-credentials ((type (eql :ntlm)) principal &key)
   (declare (ignore principal))
+  (unless *default-ntlm-values* (error "Not logged in. Call LOGON-USER first."))
   (make-instance 'ntlm-credentials))
 
 (defvar *default-flags* '(:NEGOTIATE-UNICODE
@@ -24,8 +27,6 @@
 
 (defstruct ntlm 
   user domain password)
-
-(defvar *default-ntlm-values* nil)
         
 (defclass ntlm-context ()
   ((user :initarg :user :initform nil :reader ntlm-context-user)
