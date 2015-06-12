@@ -4,8 +4,9 @@
 (asdf:defsystem :ntlm
   :name "NTLM"
   :author "Frank James <frank.a.james@gmail.com>"
-  :description "NTLM library"
+  :description "Provides NTLM authentication system to the glass API."
   :license "MIT"
+  :version "1.0.0"
   :components
   ((:file "package")
    (:file "messages" :depends-on ("package"))
