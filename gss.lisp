@@ -12,7 +12,7 @@
 
 (defmethod glass:acquire-credentials ((type (eql :ntlm)) principal &key)
   (declare (ignore principal))
-  (unless *default-ntlm-values* (error "Not logged in. Call LOGON-USER first."))
+  (unless *default-ntlm-values* (error 'glass:gss-error :major :no-cred))
   (make-instance 'ntlm-credentials))
 
 (defvar *default-flags* '(:NEGOTIATE-UNICODE

@@ -56,6 +56,7 @@
    (:target-type-server 17 "targetname must be the server name")
    (:target-type-domain 16 "targetname must be the domain name")
    (:negotiate-always-sign 15 "requests presence of signature block on all messages")
+   (:reserved-7 14 "Reserved and must be 0") ;; yet MSFT still sends it. What does it mean?
    (:negotiate-oem-workstation-supplied 13 "workstation field is present")
    (:negotiate-oem-domain-supplied 12 "domain name field is present")
    (:annonyomous 11 "if set, the connection should be anonymous")
