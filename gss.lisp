@@ -299,3 +299,6 @@
   (format nil "~A@~A" (ntlm-context-user context) (ntlm-context-domain context)))
 
 
+;; --------------------------------
+
+;; TODO: how to do the GSS mic/wrap functions for ntlm?
