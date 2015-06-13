@@ -38,7 +38,8 @@
           (pack-negotiate-message *default-flags* 
                                   :workstation (machine-instance)
                                   :domain (ntlm-domain *default-ntlm-values*)
-                                  :version (make-ntlm-version 6 1 1))))
+                                  :version (make-ntlm-version 6 1 1))
+	  t))
 
 (defmethod glass:initialize-security-context ((context ntlm-context) &key buffer)
   ;; we have received a CHALLENGE message, generate an AUTHENTICATE response
@@ -76,7 +77,8 @@
                :username username
                :workstation (machine-instance)
                :version (make-ntlm-version 6 1 1)
-               :encrypted-session-key (encrypted-session-key key-exchange-key exported-session-key)))))
+               :encrypted-session-key (encrypted-session-key key-exchange-key exported-session-key))
+	      nil)))
 
 
 (defmethod glass:accept-security-context ((creds ntlm-credentials) buffer &key)
@@ -94,7 +96,8 @@
                                     :target-info 
                                     (make-target-info :nb-domain-name (ntlm-domain *default-ntlm-values*)
                                                       :nb-computer-name (machine-instance)
-                                                      :timestamp (filetime))))))
+                                                      :timestamp (filetime)))
+	    t)))
 
 
 
@@ -292,6 +295,7 @@
 	(values (make-instance 'ntlm-context
 			       :user (cdr (assoc :username amsg))
 			       :domain (cdr (assoc :domain amsg)))
+		nil
 		nil)
 	(error 'glass:gss-error :major :defective-credential))))
 
