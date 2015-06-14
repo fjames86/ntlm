@@ -103,39 +103,56 @@
 
 ;; ------------------------
 ;; password database
+
+(defstruct db 
+  mapping stream count)
+
 (defvar *ntlm-password-path* (merge-pathnames "ntlm.dat" (user-homedir-pathname)))
-(defvar *ntlm-mapping* nil)
-(defvar *ntlm-stream* nil)
+(defvar *db* nil)
+
+(defmacro with-locked-db (&body body)
+  `(pounds:with-locked-mapping ((db-stream *db*)) ,@body))
+
 (defconstant +ntlm-block-size+ 128)
 
 (defun database-count ()
-  (file-position *ntlm-stream* 0)
-  (nibbles:read-ub32/be *ntlm-stream*))
+  (file-position (db-stream *db*) 0)
+  (nibbles:read-ub32/be (db-stream *db*)))
 
 (defun close-ntlm-database ()
-  (when *ntlm-mapping*
-    (pounds:close-mapping *ntlm-mapping*)
-    (setf *ntlm-mapping* nil
-          *ntlm-stream* nil)))
+  (when *db*
+    (pounds:close-mapping (db-mapping *db*))
+    (setf *db* nil)))
 
 (defun open-ntlm-database (&optional (count 32))
-  (unless *ntlm-mapping* 
-    (setf *ntlm-mapping* (pounds:open-mapping *ntlm-password-path* (* count +ntlm-block-size+))
-          *ntlm-stream* (pounds:make-mapping-stream *ntlm-mapping*))
-    (let ((real-count (database-count)))
-      (cond
-        ((zerop real-count)
-         ;; new mapping, write count
-         (file-position *ntlm-stream* 0)
-         (nibbles:write-ub32/be count *ntlm-stream*))
-        ((> real-count count)
-         ;; mapping is really bigger, remap
-         (close-ntlm-database)
-         (open-ntlm-database real-count))
-        ((< real-count count)
-         ;; write the new count
-         (file-position *ntlm-stream* 0)
-         (nibbles:write-ub32/be count *ntlm-stream*))))))
+  (cond
+    (*db*
+     ;; the databse is already open, check the count written in the header
+     ;; matches the count we think it is. Otherwise we need to close and remap
+     (let ((count (with-locked-db (database-count))))
+       (unless (= count (db-count *db*))
+	 (close-ntlm-database)
+	 (open-ntlm-database count))))
+    (t
+     ;; open the database
+     (let ((mapping (pounds:open-mapping *ntlm-password-path* (* count +ntlm-block-size+))))
+       (setf *db* (make-db :mapping mapping
+			   :stream (pounds:make-mapping-stream mapping)
+			   :count count))
+       (let ((real-count (database-count)))
+	 (cond
+	   ((zerop real-count)
+	    ;; new mapping, write count
+	    (file-position (db-stream *db*) 0)
+	    (nibbles:write-ub32/be count (db-stream *db*)))
+	   ((> real-count count)
+	    ;; mapping is really bigger, remap
+	    (close-ntlm-database)
+	    (open-ntlm-database real-count))
+	   ((< real-count count)
+	    ;; write the new count
+	    (file-position (db-stream *db*) 0)
+	    (nibbles:write-ub32/be count (db-stream *db*)))))))))
 
 ;; layout of each block:
 ;; <boolean 4-bytes> <username 32 bytes> <password 32 bytes> <spare 60>
@@ -172,25 +189,25 @@
   (open-ntlm-database)
   ;; walk the list until we find an unused entry 
   (let (count)
-    (pounds:with-locked-mapping (*ntlm-stream*)
+    (with-locked-db 
       (setf count (database-count))
       (do ((i 1 (1+ i)))
           ((>= i count))
-        (let ((offset (file-position *ntlm-stream*))
-              (entry (read-ntlm-entry *ntlm-stream*)))
+        (let ((offset (file-position (db-stream *db*)))
+              (entry (read-ntlm-entry (db-stream *db*))))
           (cond 
             ((and (ntlm-entry-active entry) 
                   (string= (ntlm-entry-user entry) username))
-             (file-position *ntlm-stream* offset)
-             (write-ntlm-entry *ntlm-stream* 
+             (file-position (db-stream *db*) offset)
+             (write-ntlm-entry (db-stream *db*)
                                (make-ntlm-entry :active t 
                                                 :user username 
                                                 :password password))
              (return-from add-ntlm-user nil))
             ((not (ntlm-entry-active entry))
              ;; free entry, write here
-             (file-position *ntlm-stream* offset)
-             (write-ntlm-entry *ntlm-stream* 
+             (file-position (db-stream *db*) offset)
+             (write-ntlm-entry (db-stream *db*)
                                (make-ntlm-entry :active t 
                                                 :user username 
                                                 :password password))
@@ -198,9 +215,9 @@
     ;; no free entries remap 
     (close-ntlm-database)
     (open-ntlm-database (* count 2))
-    (pounds:with-locked-mapping (*ntlm-stream*)
-      (file-position *ntlm-stream* (* +ntlm-block-size+ count))
-      (write-ntlm-entry *ntlm-stream*
+    (with-locked-db 
+      (file-position (db-stream *db*) (* +ntlm-block-size+ count))
+      (write-ntlm-entry (db-stream *db*)
                         (make-ntlm-entry :active t 
                                          :user username
                                          :password password)))
@@ -210,11 +227,11 @@
   "Lookup the named user's password."
   (open-ntlm-database)
   (let (count)
-    (pounds:with-locked-mapping (*ntlm-stream*)
+    (with-locked-db 
       (setf count (database-count))
       (do ((i 1 (1+ i)))
           ((= i count))
-        (let ((entry (read-ntlm-entry *ntlm-stream*)))
+        (let ((entry (read-ntlm-entry (db-stream *db*))))
           (when (and (ntlm-entry-active entry)
                      (string= (ntlm-entry-user entry) username))
             (return-from find-ntlm-user (ntlm-entry-password entry)))))))
@@ -224,11 +241,11 @@
   "List all entries in the user database."
   (open-ntlm-database)
   (let (count users)
-    (pounds:with-locked-mapping (*ntlm-stream*)
+    (with-locked-db 
       (setf count (database-count))
       (do ((i 1 (1+ i)))
           ((= i count))
-        (let ((entry (read-ntlm-entry *ntlm-stream*)))
+        (let ((entry (read-ntlm-entry (db-stream *db*))))
           (when (ntlm-entry-active entry)
             (push (list :name (ntlm-entry-user entry)
                         :password (ntlm-entry-password entry))
@@ -240,16 +257,17 @@
   "Delete the named user from the local database."
   (open-ntlm-database)
   (let (count)
-    (pounds:with-locked-mapping (*ntlm-stream*)
+    (with-locked-db 
       (setf count (database-count))
-      (do ((i 1 (1+ i)))
+      (do ((i 1 (1+ i))
+	   (stream (db-stream *db*)))
           ((= i count))
-        (let ((offset (file-position *ntlm-stream*))
-              (entry (read-ntlm-entry *ntlm-stream*)))
+        (let ((offset (file-position stream))
+              (entry (read-ntlm-entry stream)))
           (when (and (ntlm-entry-active entry)
                      (string= (ntlm-entry-user entry) username))
-            (file-position *ntlm-stream* offset)
-            (nibbles:write-ub32/be 0 *ntlm-stream*)
+            (file-position stream offset)
+            (nibbles:write-ub32/be 0 stream)
             (return-from remove-ntlm-user nil))))))
   nil)
 
