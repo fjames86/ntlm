@@ -1,7 +1,6 @@
 
 # NTLM
-
-NTLM is a library for handling the NTLM authentication protocol, commonly used by Microsoft Windows platforms.
+This is a library for handling the NTLM authentication protocol, commonly used by Microsoft Windows platforms.
 
 Documentation for the protocol can be found here http://msdn.microsoft.com/en-us/library/cc236621.aspx
 
@@ -61,8 +60,9 @@ by comparing the challenge we sent to the client and what we received. This requ
 password MD4 hash. One possibility is to proxy the call out to the local domain controller (Active Directory),
 this lies beyond the scope of this tool.
 
-Instead this library users a custom local shared database of usernames and passwords, 
-which are stored in plain text on disk. All users which can be authenticated MUST have an entry added to this database.
+Instead this library maintains a local shared database of usernames and passwords, 
+which are stored in plain text on disk. 
+All users which can be authenticated MUST have an entry added to this database.
 The GSS methods to authenticate calls use this database to lookup passwords to compare against.
 
 ```
@@ -76,12 +76,12 @@ CL-USER> (ntlm:list-ntlm-users)
 ((:NAME "User2" :PASSWORD "5555"))
 ```
 
-
-## 4. TODO
+## 4. Notes
 
 * Needs much more error checking, e.g. analyzing the flags to make sure information is present
 * There are several different versions of "NTLM": v1, v2, with session security etc. 
-These should all be handled seamlessly.
+These should all be handled seamlessly. Currently I just use some default values that work for me.
+
 
 ## 5. License
 Licensed under the terms of the MIT license.
