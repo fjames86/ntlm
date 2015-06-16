@@ -6,13 +6,13 @@
   :author "Frank James <frank.a.james@gmail.com>"
   :description "Provides NTLM authentication system to the glass API."
   :license "MIT"
-  :version "1.0.0"
+  :version "1.0.1"
+  :serial t
   :components
   ((:file "package")
-   (:file "messages" :depends-on ("package"))
-   (:file "security" :depends-on ("messages"))
-   (:file "gss" :depends-on ("security")))
+   (:file "messages")
+   (:file "security")
+   (:file "database")
+   (:file "gss"))
   :depends-on (:packet :ironclad :cl-base64 :pounds :glass))
-
-
 

@@ -8,11 +8,11 @@
 (defclass ntlm-credentials ()
   ())
 
-(defvar *default-ntlm-values* nil)
+(defvar *current-user* nil)
 
 (defmethod glass:acquire-credentials ((type (eql :ntlm)) principal &key)
   (declare (ignore principal))
-  (unless *default-ntlm-values* (error 'glass:gss-error :major :no-cred))
+  (unless *current-user* (error 'glass:gss-error :major :no-cred))
   (make-instance 'ntlm-credentials))
 
 (defvar *default-flags* '(:NEGOTIATE-UNICODE
@@ -26,7 +26,7 @@
                             :NEGOTIATE-56))
 
 (defstruct ntlm 
-  user domain password)
+  user domain password-md4)
         
 (defclass ntlm-context ()
   ((user :initarg :user :initform nil :reader ntlm-context-user)
@@ -37,15 +37,15 @@
   (values (make-instance 'ntlm-context)
           (pack-negotiate-message *default-flags* 
                                   :workstation (machine-instance)
-                                  :domain (ntlm-domain *default-ntlm-values*)
+                                  :domain (ntlm-domain *current-user*)
                                   :version (make-ntlm-version 6 1 1))
 	  t))
 
 (defmethod glass:initialize-security-context ((context ntlm-context) &key buffer)
   ;; we have received a CHALLENGE message, generate an AUTHENTICATE response
-  (let* ((username (ntlm-user *default-ntlm-values*))
-         (domain (ntlm-domain *default-ntlm-values*))
-         (password-md4 (ntlm-password *default-ntlm-values*))
+  (let* ((username (ntlm-user *current-user*))
+         (domain (ntlm-domain *current-user*))
+         (password-md4 (ntlm-password-md4 *current-user*))
          (challenge (unpack-challenge-message buffer))
          (lmowf (lmowf-v2 username domain password-md4))
          (ntowf (ntowf-v2 username domain password-md4))
@@ -94,192 +94,19 @@
                                     :target-name (machine-instance)
                                     :version (make-ntlm-version 6 1 1)
                                     :target-info 
-                                    (make-target-info :nb-domain-name (ntlm-domain *default-ntlm-values*)
+                                    (make-target-info :nb-domain-name (ntlm-domain *current-user*)
                                                       :nb-computer-name (machine-instance)
                                                       :timestamp (filetime)))
 	    t)))
-
-
-
-;; ------------------------
-;; password database
-
-(defstruct db 
-  mapping stream count)
-
-(defvar *ntlm-password-path* (merge-pathnames "ntlm.dat" (user-homedir-pathname)))
-(defvar *db* nil)
-
-(defmacro with-locked-db (&body body)
-  `(pounds:with-locked-mapping ((db-stream *db*)) ,@body))
-
-(defconstant +ntlm-block-size+ 128)
-
-(defun database-count ()
-  (file-position (db-stream *db*) 0)
-  (nibbles:read-ub32/be (db-stream *db*)))
-
-(defun close-ntlm-database ()
-  (when *db*
-    (pounds:close-mapping (db-mapping *db*))
-    (setf *db* nil)))
-
-(defun open-ntlm-database (&optional (count 32))
-  (cond
-    (*db*
-     ;; the databse is already open, check the count written in the header
-     ;; matches the count we think it is. Otherwise we need to close and remap
-     (let ((count (with-locked-db (database-count))))
-       (unless (= count (db-count *db*))
-	 (close-ntlm-database)
-	 (open-ntlm-database count))))
-    (t
-     ;; open the database
-     (let ((mapping (pounds:open-mapping *ntlm-password-path* (* count +ntlm-block-size+))))
-       (setf *db* (make-db :mapping mapping
-			   :stream (pounds:make-mapping-stream mapping)
-			   :count count))
-       (let ((real-count (database-count)))
-	 (cond
-	   ((zerop real-count)
-	    ;; new mapping, write count
-	    (file-position (db-stream *db*) 0)
-	    (nibbles:write-ub32/be count (db-stream *db*)))
-	   ((> real-count count)
-	    ;; mapping is really bigger, remap
-	    (close-ntlm-database)
-	    (open-ntlm-database real-count))
-	   ((< real-count count)
-	    ;; write the new count
-	    (file-position (db-stream *db*) 0)
-	    (nibbles:write-ub32/be count (db-stream *db*)))))))))
-
-;; layout of each block:
-;; <boolean 4-bytes> <username 32 bytes> <password 32 bytes> <spare 60>
-(defstruct ntlm-entry 
-  active user password)
-
-(defun read-ntlm-entry (stream)
-  (let ((offset (file-position stream))
-        (entry (make-ntlm-entry :active (not (zerop (nibbles:read-ub32/be stream))))))
-    (let* ((count (nibbles:read-ub32/be stream))
-           (buff (nibbles:make-octet-vector count)))
-      (read-sequence buff stream)
-      (setf (ntlm-entry-user entry) (babel:octets-to-string buff)))
-    (file-position stream (+ offset 4 32))
-    (let* ((count (nibbles:read-ub32/be stream))
-           (buff (nibbles:make-octet-vector count)))
-      (read-sequence buff stream)
-      (setf (ntlm-entry-password entry) (babel:octets-to-string buff)))
-    entry))
-
-(defun write-ntlm-entry (stream entry)
-  (let ((offset (file-position stream)))
-    (nibbles:write-ub32/be 1 stream)
-    (let ((octets (babel:string-to-octets (ntlm-entry-user entry))))
-      (nibbles:write-ub32/be (length octets) stream)
-      (write-sequence octets stream))
-    (file-position stream (+ offset 4 32))
-    (let ((octets (babel:string-to-octets (ntlm-entry-password entry))))
-      (nibbles:write-ub32/be (length octets) stream)
-      (write-sequence octets stream))))
-
-(defun add-ntlm-user (username password)
-  "Add a new entry into the local database."
-  (open-ntlm-database)
-  ;; walk the list until we find an unused entry 
-  (let (count)
-    (with-locked-db 
-      (setf count (database-count))
-      (do ((i 1 (1+ i)))
-          ((>= i count))
-        (let ((offset (file-position (db-stream *db*)))
-              (entry (read-ntlm-entry (db-stream *db*))))
-          (cond 
-            ((and (ntlm-entry-active entry) 
-                  (string= (ntlm-entry-user entry) username))
-             (file-position (db-stream *db*) offset)
-             (write-ntlm-entry (db-stream *db*)
-                               (make-ntlm-entry :active t 
-                                                :user username 
-                                                :password password))
-             (return-from add-ntlm-user nil))
-            ((not (ntlm-entry-active entry))
-             ;; free entry, write here
-             (file-position (db-stream *db*) offset)
-             (write-ntlm-entry (db-stream *db*)
-                               (make-ntlm-entry :active t 
-                                                :user username 
-                                                :password password))
-             (return-from add-ntlm-user nil))))))
-    ;; no free entries remap 
-    (close-ntlm-database)
-    (open-ntlm-database (* count 2))
-    (with-locked-db 
-      (file-position (db-stream *db*) (* +ntlm-block-size+ count))
-      (write-ntlm-entry (db-stream *db*)
-                        (make-ntlm-entry :active t 
-                                         :user username
-                                         :password password)))
-    nil))
-    
-(defun find-ntlm-user (username)
-  "Lookup the named user's password."
-  (open-ntlm-database)
-  (let (count)
-    (with-locked-db 
-      (setf count (database-count))
-      (do ((i 1 (1+ i)))
-          ((= i count))
-        (let ((entry (read-ntlm-entry (db-stream *db*))))
-          (when (and (ntlm-entry-active entry)
-                     (string= (ntlm-entry-user entry) username))
-            (return-from find-ntlm-user (ntlm-entry-password entry)))))))
-  nil)
-
-(defun list-ntlm-users ()
-  "List all entries in the user database."
-  (open-ntlm-database)
-  (let (count users)
-    (with-locked-db 
-      (setf count (database-count))
-      (do ((i 1 (1+ i)))
-          ((= i count))
-        (let ((entry (read-ntlm-entry (db-stream *db*))))
-          (when (ntlm-entry-active entry)
-            (push (list :name (ntlm-entry-user entry)
-                        :password (ntlm-entry-password entry))
-                  users)))))
-    users))
-  
-
-(defun remove-ntlm-user (username)
-  "Delete the named user from the local database."
-  (open-ntlm-database)
-  (let (count)
-    (with-locked-db 
-      (setf count (database-count))
-      (do ((i 1 (1+ i))
-	   (stream (db-stream *db*)))
-          ((= i count))
-        (let ((offset (file-position stream))
-              (entry (read-ntlm-entry stream)))
-          (when (and (ntlm-entry-active entry)
-                     (string= (ntlm-entry-user entry) username))
-            (file-position stream offset)
-            (nibbles:write-ub32/be 0 stream)
-            (return-from remove-ntlm-user nil))))))
-  nil)
-
 
 (defun logon-user (username password &optional domain)
   "Logon the current user using the USERNAME and PASSWORD." 
   (declare (type string username password)
            (type (or string null) domain))
   (open-ntlm-database)
-  (setf *default-ntlm-values*
+  (setf *current-user*
         (make-ntlm :user username
-                   :password (password-md4 password)
+                   :password-md4 (password-md4 password)
                    :domain domain))
   nil)
 
