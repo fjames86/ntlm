@@ -75,9 +75,8 @@
 (defun remove-ntlm-user (username)
   "Delete the named user from the local database."
   (open-ntlm-database)
-  (setf (pounds.db:find-entry username *db*
-                              :test #'string-equal
-                              :key #'ntlm-entry-user)
-        nil))
+  (pounds.db:remove-entry username *db*
+			  :test #'string-equal
+			  :key #'ntlm-entry-user))
 
 
